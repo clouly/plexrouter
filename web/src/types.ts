@@ -186,6 +186,8 @@ export interface AppConfig {
   allow_register: boolean;
   /** Only the third-party sign-in providers configured on the server. */
   oauth_providers: OAuthProvider[];
+  /** True until an admin account exists: the console shows the setup wizard instead. */
+  setup_required: boolean;
 }
 
 export type OAuthProvider = "google" | "github";
@@ -344,3 +346,82 @@ export interface AdminUserUpdate {
   disabled?: boolean;
   rate_limit_rpm?: number | null;
 }
+
+// ---------------------------------------------------------------------------
+// First-run setup and system settings
+
+export type CallbackUrls = Record<OAuthProvider, string>;
+
+export interface SetupInfo {
+  setup_required: boolean;
+  /** Derived from the request. */
+  suggested_public_url: string;
+  /** For suggested_public_url. */
+  callback_urls: CallbackUrls;
+}
+
+export interface OAuthCredentials {
+  client_id: string;
+  client_secret: string;
+}
+
+export interface SetupInput {
+  site_name?: string;
+  public_url?: string;
+  github?: OAuthCredentials;
+  google?: OAuthCredentials;
+}
+
+export interface SetupResult {
+  ok: true;
+  oauth_providers: OAuthProvider[];
+}
+
+export interface OAuthProviderSettings {
+  client_id: string;
+  client_secret_set: boolean;
+}
+
+export interface SystemSettings {
+  site_name: string;
+  /** "" = derive from each request. */
+  public_url: string;
+  allow_register: boolean;
+  /** USD for new accounts. */
+  signup_credit: number;
+  /** Requests/minute per user unless set on the user; 0 = unlimited. */
+  default_user_rpm: number;
+  request_timeout_seconds: number;
+  /** 0 = keep forever. */
+  log_retention_days: number;
+  /** Read client IPs from X-Forwarded-For. */
+  trust_proxy: boolean;
+  github: OAuthProviderSettings;
+  google: OAuthProviderSettings;
+}
+
+/** Where a setting's current value comes from: console value > environment variable > built-in default. */
+export type SettingSource = "console" | "env" | "default";
+
+export type SystemSettingKey = keyof SystemSettings;
+
+export interface SystemSettingsResponse {
+  settings: SystemSettings;
+  sources: Partial<Record<SystemSettingKey, SettingSource>>;
+  callback_urls: CallbackUrls;
+}
+
+export interface OAuthProviderPatch {
+  client_id?: string | null;
+  client_secret?: string;
+}
+
+type Nullable<T> = { [K in keyof T]?: T[K] | null };
+
+/** PATCH body: any subset; null resets a field to its env/default value. */
+export type SystemSettingsInput = Nullable<Omit<SystemSettings, "github" | "google">> & {
+  /** client_id "" disables the provider, null drops the console value (back to the env variable, if any);
+   *  client_secret "" keeps the current one. */
+  github?: OAuthProviderPatch;
+  google?: OAuthProviderPatch;
+};

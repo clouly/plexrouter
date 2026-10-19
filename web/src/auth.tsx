@@ -8,12 +8,14 @@ interface AuthValue {
   config: AppConfig | null;
   setUser: (u: User | null) => void;
   refreshUser: () => Promise<void>;
+  /** Re-fetches /api/config (e.g. after setup or after changing the site name / sign-in providers). */
+  refreshConfig: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
 
-const fallbackConfig: AppConfig = { name: "PlexRouter", version: "", allow_register: true, oauth_providers: [] };
+const fallbackConfig: AppConfig = { name: "PlexRouter", version: "", allow_register: true, oauth_providers: [], setup_required: false };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -29,14 +31,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshConfig = useCallback(async () => {
+    try {
+      const c = await api.config();
+      // Older servers may not send oauth_providers / setup_required; keep only the providers we know how to show.
+      setConfig({
+        ...c,
+        oauth_providers: (c.oauth_providers ?? []).filter((p) => OAUTH_PROVIDERS.includes(p)),
+        setup_required: c.setup_required === true,
+      });
+    } catch {
+      // Keep the config we have; fall back only if there is none yet.
+      setConfig((prev) => prev ?? fallbackConfig);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshUser();
-    api
-      .config()
-      // Older servers may not send oauth_providers; keep only the providers we know how to show.
-      .then((c) => setConfig({ ...c, oauth_providers: (c.oauth_providers ?? []).filter((p) => OAUTH_PROVIDERS.includes(p)) }))
-      .catch(() => setConfig(fallbackConfig));
-  }, [refreshUser]);
+    void refreshConfig();
+  }, [refreshUser, refreshConfig]);
 
   // Document titles ("<page> · <app name>") are set per page by useDocumentTitle, which re-runs when
   // the config name or the language changes.
@@ -49,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  return <AuthContext.Provider value={{ user, config, setUser, refreshUser, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, config, setUser, refreshUser, refreshConfig, logout }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthValue {

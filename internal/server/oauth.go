@@ -22,12 +22,12 @@ const (
 )
 
 // SetOAuthProvider registers (or replaces) a sign-in provider.
-func (s *Server) SetOAuthProvider(p *oauth.Provider) { s.oauth[p.Name] = p }
+func (s *Server) SetOAuthProvider(p *oauth.Provider) { s.oauthOverride[p.Name] = p }
 
 func (s *Server) oauthProviderNames() []string {
 	names := []string{}
 	for _, n := range []string{oauth.Google, oauth.GitHub} {
-		if _, ok := s.oauth[n]; ok {
+		if _, ok := s.oauthProvider(n); ok {
 			names = append(names, n)
 		}
 	}
@@ -44,15 +44,15 @@ type oauthAttempt struct {
 }
 
 func (s *Server) publicBase(r *http.Request) string {
-	if s.cfg.PublicURL != "" {
-		return s.cfg.PublicURL
+	if u := s.publicURL(); u != "" {
+		return u
 	}
 	scheme := "http"
 	if isHTTPS(r) {
 		scheme = "https"
 	}
 	host := r.Host
-	if h := r.Header.Get("X-Forwarded-Host"); h != "" && s.cfg.TrustProxy {
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" && s.trustProxy() {
 		host = h
 	}
 	return scheme + "://" + host
@@ -74,7 +74,7 @@ func oauthFail(w http.ResponseWriter, r *http.Request, link bool, code string) {
 // provider to the logged-in account instead of signing in.
 func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	link := r.URL.Query().Get("mode") == "link"
-	p, ok := s.oauth[r.PathValue("provider")]
+	p, ok := s.oauthProvider(r.PathValue("provider"))
 	if !ok {
 		oauthFail(w, r, link, "not_configured")
 		return
@@ -121,7 +121,7 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		oauthFail(w, r, link, "state_mismatch")
 		return
 	}
-	p, ok := s.oauth[name]
+	p, ok := s.oauthProvider(name)
 	if !ok {
 		oauthFail(w, r, link, "not_configured")
 		return
@@ -180,8 +180,16 @@ func (s *Server) isAdminEmail(email string) bool {
 // ensureAdmin promotes a user listed in PLEXROUTER_ADMIN_EMAILS, so an
 // operator can always (re)gain admin access by signing in.
 func (s *Server) ensureAdmin(ctx context.Context, u *store.User) (*store.User, error) {
-	if u.IsAdmin() || !s.isAdminEmail(u.Email) {
+	if u.IsAdmin() {
 		return u, nil
+	}
+	if !s.isAdminEmail(u.Email) {
+		// Without an admin list, whoever signs in while the instance has no
+		// admin (first-run setup) becomes one.
+		setup, err := s.setupRequired(ctx)
+		if err != nil || !setup || len(s.cfg.AdminEmails) > 0 {
+			return u, err
+		}
 	}
 	role := store.RoleAdmin
 	return s.store.UpdateUser(ctx, u.ID, store.UserUpdate{Role: &role})
@@ -224,8 +232,8 @@ func (s *Server) oauthSignIn(ctx context.Context, prof *oauth.Profile, id store.
 		return nil, "", err
 	}
 
-	// With an admin list, only listed emails become admins; without one, the
-	// first account does (and may always be created).
+	// With an admin list, only listed emails become admins; without one, an
+	// account created while no admin exists does (and may always be created).
 	role := ""
 	if len(s.cfg.AdminEmails) > 0 {
 		role = store.RoleUser
@@ -233,12 +241,13 @@ func (s *Server) oauthSignIn(ctx context.Context, prof *oauth.Profile, id store.
 			role = store.RoleAdmin
 		}
 	}
-	if !s.cfg.AllowRegister && role != store.RoleAdmin {
-		n, err := s.store.CountUsers(ctx)
+	if !s.allowRegister() && role != store.RoleAdmin {
+		// While no admin exists, the person finishing setup must get in.
+		setup, err := s.setupRequired(ctx)
 		if err != nil {
 			return nil, "", err
 		}
-		if n > 0 || role == store.RoleUser {
+		if !setup || role == store.RoleUser {
 			return nil, "registration_closed", nil
 		}
 	}
@@ -246,7 +255,7 @@ func (s *Server) oauthSignIn(ctx context.Context, prof *oauth.Profile, id store.
 	if name == "" {
 		name = prof.Email
 	}
-	u, err = s.store.CreateOAuthUser(ctx, prof.Email, name, role, store.FromUSD(s.cfg.SignupCredit), id)
+	u, err = s.store.CreateOAuthUser(ctx, prof.Email, name, role, store.FromUSD(s.signupCredit()), id)
 	if errors.Is(err, store.ErrIdentityTaken) || errors.Is(err, store.ErrEmailTaken) {
 		return nil, "already_linked", nil // lost a race with a concurrent sign-in
 	}

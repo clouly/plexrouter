@@ -225,7 +225,7 @@ func (g *Gateway) checkLimits(c *caller) error {
 	if c.key.RateLimitRPM != nil && *c.key.RateLimitRPM > 0 {
 		limits = append(limits, limit{fmt.Sprintf("k%d", c.key.ID), *c.key.RateLimitRPM})
 	}
-	userRPM := g.opts.DefaultUserRPM
+	userRPM := g.options().DefaultUserRPM
 	if c.user.RateLimitRPM != nil {
 		userRPM = *c.user.RateLimitRPM
 	}

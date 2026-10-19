@@ -1,8 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { translateErrorCode } from "../i18n";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, useAppName } from "../auth";
-import { useT } from "../i18n";
+import { translateErrorCode, useT } from "../i18n";
 import { useDocumentTitle } from "../lib/hooks";
 import { Icon } from "../components/Icon";
 import { Notice } from "../components/Card";
@@ -10,7 +9,21 @@ import { ThemeToggle } from "../layout/Layout";
 import { LanguageMenu } from "../components/LanguageMenu";
 import { OAuthButtons } from "../components/OAuth";
 
-function AuthShell({ title, subtitle, children, footer }: { title: string; subtitle?: string; children: ReactNode; footer?: ReactNode }) {
+/** Centered page with the app name, language and theme toggles; used by the login page and the setup wizard. */
+export function AuthShell({
+  title,
+  subtitle,
+  children,
+  footer,
+  wide,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  /** Wider column for longer forms (setup wizard). */
+  wide?: boolean;
+}) {
   const name = useAppName();
   const t = useT();
   return (
@@ -27,11 +40,11 @@ function AuthShell({ title, subtitle, children, footer }: { title: string; subti
           <ThemeToggle />
         </div>
       </header>
-      <main className="flex flex-1 items-start justify-center px-4 pt-[8vh] pb-12">
-        <div className="w-full max-w-sm">
+      <main className={`flex flex-1 items-start justify-center px-4 pb-12 ${wide ? "pt-[4vh]" : "pt-[8vh]"}`}>
+        <div className={`w-full ${wide ? "max-w-xl" : "max-w-sm"}`}>
           <h1 className="text-center text-xl font-semibold tracking-tight">{title}</h1>
           {subtitle && <p className="mt-1.5 text-center text-sm text-muted">{subtitle}</p>}
-          <div className="mt-6 rounded-xl border border-line bg-surface p-5 shadow-xs">{children}</div>
+          <div className={`mt-6 rounded-xl border border-line bg-surface shadow-xs ${wide ? "p-4 sm:p-6" : "p-5"}`}>{children}</div>
           {footer && <div className="mt-4 text-center text-xs text-muted">{footer}</div>}
           <div className="mt-6 flex justify-center gap-4 text-xs text-muted">
             <Link to="/models" className="hover:text-fg">
@@ -51,7 +64,7 @@ function AuthShell({ title, subtitle, children, footer }: { title: string; subti
  * Reads `?oauth_error=<code>` once (set by the server after a failed Google/GitHub sign-in),
  * returns its localized text, and strips the param from the URL.
  */
-function useOAuthError(): string {
+function useOAuthError(): { code: string | null; message: string } {
   const t = useT();
   const location = useLocation();
   const navigate = useNavigate();
@@ -66,8 +79,8 @@ function useOAuthError(): string {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!code) return "";
-  return translateErrorCode(code) ?? t("auth.oauthFailed", { code });
+  if (!code) return { code: null, message: "" };
+  return { code, message: translateErrorCode(code) ?? t("auth.oauthFailed", { code }) };
 }
 
 /** Sign-in is only through Google / GitHub; the first sign-in creates the account. */
@@ -75,8 +88,12 @@ export function LoginPage() {
   const t = useT();
   const { config } = useAuth();
   useDocumentTitle(t("auth.login"), config?.name);
-  const oauthError = useOAuthError();
+  const { code: oauthCode, message: oauthError } = useOAuthError();
   const providers = config?.oauth_providers ?? [];
+
+  // A fresh instance goes to the setup wizard — unless the first sign-in just failed, in which case
+  // the error stays here with a way back to setup to fix the credentials.
+  if (config?.setup_required && !oauthCode) return <Navigate to="/setup" replace />;
 
   return (
     <AuthShell
@@ -85,7 +102,17 @@ export function LoginPage() {
     >
       {oauthError && (
         <div role="alert" className="mb-4">
-          <Notice tone="danger">{oauthError}</Notice>
+          <Notice tone="danger">
+            {oauthError}
+            {config?.setup_required && (
+              <span className="mt-1.5 block">
+                {t("auth.setupRetryHint")}{" "}
+                <Link to="/setup" className="font-medium underline underline-offset-2 hover:no-underline">
+                  {t("auth.backToSetup")}
+                </Link>
+              </span>
+            )}
+          </Notice>
         </div>
       )}
       {config && providers.length === 0 ? (

@@ -138,6 +138,22 @@ type RedeemCode = {
   created_at: string;
 };
 
+type SystemSettings = {
+  site_name: string;
+  public_url: string;          // "" = derive from each request
+  allow_register: boolean;     // create accounts for new Google/GitHub users
+  signup_credit: number;       // USD for new accounts
+  default_user_rpm: number;    // requests/minute per user unless set on the user; 0 = unlimited
+  request_timeout_seconds: number;
+  log_retention_days: number;  // 0 = keep forever
+  trust_proxy: boolean;        // read client IPs from X-Forwarded-For
+  github: { client_id: string; client_secret_set: boolean };
+  google: { client_id: string; client_secret_set: boolean };
+};
+// PATCH body: the same scalar fields, plus { github?: { client_id?, client_secret? }, google?: {...} }.
+// A provider's client_id "" disables it; null drops the console value (back to the env variable, if any).
+// The server refuses (400 no_sign_in_provider) a change that would leave no sign-in provider.
+
 type DailyStat = { date: string /* YYYY-MM-DD */; requests: number; tokens: number; cost: number };
 
 // Model from the public OpenRouter catalog, used as a reference for importing.
@@ -169,7 +185,18 @@ type ReportRow = { requests: number; tokens: number; revenue: number; upstream_c
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/config` | | `{ name: string, version: string, allow_register: boolean, oauth_providers: ("google" \| "github")[] }` — `oauth_providers` lists only the ones configured on the server |
+| GET | `/api/config` | | `{ name: string, version: string, allow_register: boolean, oauth_providers: ("google" \| "github")[], setup_required: boolean }` — `oauth_providers` lists only the configured ones. `setup_required` is true until an admin account exists: the console then shows the setup wizard instead of everything else (except Models and Docs) |
+
+## First-run setup
+
+A fresh instance has no configuration. While `setup_required` is true, anyone who opens the console can run the setup wizard (there is no setup code — the first visitor sets the instance up), then the **first person to sign in becomes the admin**.
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| GET | `/api/setup` | | `{ setup_required: boolean, suggested_public_url: string /* from the request */, callback_urls: { github: string, google: string } /* for suggested_public_url */ }` |
+| POST | `/api/setup` | `{ site_name?: string, public_url?: string, github?: { client_id, client_secret }, google?: { client_id, client_secret } }` — at least one provider required | `{ ok: true, oauth_providers: ("google" \| "github")[] }`. `403 setup_done` once an admin exists. `400 invalid_request` if no provider is given or a value is malformed. May be called again (e.g. to fix a typo) until someone has signed in as admin |
+
+After a successful POST, the wizard sends the browser to `/api/auth/oauth/<provider>?mode=login`; that sign-in creates the admin.
 | GET | `/api/models` | | `{ data: PublicModel[] }` (enabled models only) |
 
 ## Auth
@@ -212,6 +239,8 @@ The console should show a localized message for these `error.code` values and fa
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
+| GET | `/api/admin/settings` | | `{ settings: SystemSettings, sources: Record<keyof SystemSettings, "console" \| "env" \| "default">, callback_urls: { github: string, google: string } }` — `sources` says where each current value comes from (console value > environment variable > built-in default) |
+| PATCH | `/api/admin/settings` | any subset of `SystemSettingsInput` — `null` resets a field to its env/default value; a secret sent as `""` keeps the current one | `{ settings, sources, callback_urls }` |
 | GET | `/api/admin/stats` | | `{ users, providers, models, total_balance, requests_today, cost_today /* = revenue today */, profit_today, daily: DailyStat[] /* 14 days */, alerts: Alert[] }` |
 | GET | `/api/admin/report` | `days?` (default 30, max 365) | `{ totals: ReportRow, daily: (ReportRow & { date: string })[] /* zero-filled, oldest first */, by_model: (ReportRow & { model: string })[], by_provider: (ReportRow & { provider_id: number, provider: string, success_rate: number \| null })[] }` |
 | GET | `/api/admin/providers` | | `{ data: Provider[] }` |

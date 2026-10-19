@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { copyText } from "../lib/clipboard";
 import { cx } from "../lib/cx";
 import { useT } from "../i18n";
@@ -49,5 +49,18 @@ export function CopyButton({ text, label, className, size = "icon" }: { text: st
     >
       <Icon name={copied ? "check" : "copy"} className={cx("size-3.5", copied && "text-emerald-600 dark:text-emerald-400")} />
     </button>
+  );
+}
+
+/** A labelled value with a copy button, for the fields to paste into the provider's form. */
+export function CopyRow({ label, value }: { label: ReactNode; value: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-subtle/60 px-3 py-2">
+      <div className="text-[11px] font-medium text-muted">{label}</div>
+      <div className="mt-0.5 flex items-center gap-2">
+        <code className="min-w-0 flex-1 font-mono text-[13px] break-all">{value || "—"}</code>
+        {value && <CopyButton text={value} className="shrink-0" />}
+      </div>
+    </div>
   );
 }

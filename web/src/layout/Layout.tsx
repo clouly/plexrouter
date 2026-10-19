@@ -36,6 +36,7 @@ const adminNav: NavItem[] = [
   { to: "/admin/users", label: "nav.adminUsers", icon: "users" },
   { to: "/admin/logs", label: "nav.adminLogs", icon: "list" },
   { to: "/admin/redeem-codes", label: "nav.adminRedeem", icon: "ticket" },
+  { to: "/admin/settings", label: "nav.adminSettings", icon: "settings" },
 ];
 
 function Logo({ name }: { name: string }) {

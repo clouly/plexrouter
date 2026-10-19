@@ -6,6 +6,7 @@ import { Layout } from "./layout/Layout";
 import { Spinner } from "./components/Spinner";
 import { EmptyState } from "./components/EmptyState";
 import { LoginPage } from "./pages/Auth";
+import { SetupPage } from "./pages/Setup";
 import { DashboardPage } from "./pages/Dashboard";
 import { KeysPage } from "./pages/Keys";
 import { ModelsPage } from "./pages/Models";
@@ -21,6 +22,7 @@ import { AdminModelsPage } from "./pages/admin/Models";
 import { AdminUsersPage } from "./pages/admin/Users";
 import { AdminLogsPage } from "./pages/admin/Logs";
 import { AdminRedeemCodesPage } from "./pages/admin/RedeemCodes";
+import { AdminSystemSettingsPage } from "./pages/admin/SystemSettings";
 
 function FullPageSpinner() {
   return (
@@ -58,12 +60,39 @@ function GuestOnly({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Paths reachable while the instance still needs its first-run setup. */
+function setupExempt(path: string): boolean {
+  // /login handles setup_required itself (it keeps a failed first sign-in's error on screen).
+  return ["/setup", "/login", "/models", "/docs"].some((p) => path === p || path.startsWith(p + "/"));
+}
+
+/** Until an admin exists (config.setup_required), everything but a few public pages goes to /setup. */
+function SetupGate({ children }: { children: ReactNode }) {
+  const { config } = useAuth();
+  const location = useLocation();
+  if (setupExempt(location.pathname)) return <>{children}</>;
+  if (!config) return <FullPageSpinner />;
+  if (config.setup_required) return <Navigate to="/setup" replace />;
+  return <>{children}</>;
+}
+
+/** /setup is only for a fresh instance; afterwards it goes to the login page (or home when signed in). */
+function SetupOnly({ children }: { children: ReactNode }) {
+  const { config, user } = useAuth();
+  if (!config) return <FullPageSpinner />;
+  if (config.setup_required) return <>{children}</>;
+  if (user === undefined) return <FullPageSpinner />;
+  return <Navigate to={user ? "/" : "/login"} replace />;
+}
+
 const auth = (el: ReactNode) => <RequireAuth>{el}</RequireAuth>;
 const admin = (el: ReactNode) => <RequireAdmin>{el}</RequireAdmin>;
 
 export function App() {
   return (
+    <SetupGate>
     <Routes>
+      <Route path="/setup" element={<SetupOnly><SetupPage /></SetupOnly>} />
       <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
       <Route path="/register" element={<Navigate to="/login" replace />} />
       <Route element={<Layout />}>
@@ -82,9 +111,11 @@ export function App() {
           <Route path="users" element={admin(<AdminUsersPage />)} />
           <Route path="logs" element={admin(<AdminLogsPage />)} />
           <Route path="redeem-codes" element={admin(<AdminRedeemCodesPage />)} />
+          <Route path="settings" element={admin(<AdminSystemSettingsPage />)} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
+    </SetupGate>
   );
 }

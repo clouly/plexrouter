@@ -198,6 +198,12 @@ ALTER TABLE model_endpoints ADD COLUMN cache_write_cost REAL;
 ALTER TABLE request_logs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE request_logs ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE request_logs ADD COLUMN api TEXT NOT NULL DEFAULT 'chat';
+`, `
+CREATE TABLE settings (
+	key        TEXT    PRIMARY KEY,
+	value      TEXT    NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

@@ -22,96 +22,49 @@
 
 ## Quick start
 
-Users sign in with **GitHub or Google** (there are no passwords), so first create an OAuth app. GitHub is the quickest: [Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers), with homepage `http://localhost:8080` and callback URL `http://localhost:8080/api/auth/oauth/github/callback`. Copy the client ID and generate a client secret.
-
-### Docker
-
 ```bash
-docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data \
-  -e PLEXROUTER_GITHUB_CLIENT_ID=<client-id> -e PLEXROUTER_GITHUB_CLIENT_SECRET=<client-secret> \
-  ghcr.io/local4a/plexrouter:latest
+docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data ghcr.io/local4a/plexrouter:latest
 ```
 
-or with compose (put the two variables in `.env`):
+Open <http://localhost:8080> (or your server's address). A **setup wizard** connects GitHub or Google sign-in: it shows the exact homepage and callback URLs to paste when you create the OAuth app, so it takes a couple of minutes. The first person to sign in becomes the admin, and everything else is configured in the console:
 
-```bash
-docker compose up -d
-```
+1. **Admin → Providers**: add your OpenAI, Anthropic, Gemini, DeepSeek… API keys, then click **Test**.
+2. **Admin → Models**: **Import from catalog** (names, context lengths and prices included, with your markup), or add models by hand.
+3. **Admin → Users**: give credits, or create redeem codes.
+4. **API Keys**: create a key and call the API.
 
-### Binary
+> Until someone has signed in as admin, whoever opens the page can run the setup. Finish it right after starting the container.
 
-Download a binary from [Releases](https://github.com/local4a/plexrouter/releases) and run it:
+Other ways to run it:
 
-```bash
-./plexrouter
-```
-
-### From source
-
-Requires Go 1.23+ and Node.js 20+.
-
-```bash
-git clone https://github.com/local4a/plexrouter.git
-cd plexrouter
-make build        # builds the console into web/dist and the server into bin/
-./bin/plexrouter
-```
-
-Then open <http://localhost:8080>:
-
-1. **Sign in with GitHub** — the first account becomes the admin (or list admins in `PLEXROUTER_ADMIN_EMAILS`).
-2. **Admin → Providers** — add a provider (e.g. type `openai` with your OpenAI key, or `openai_compatible` with `https://api.deepseek.com/v1`). Click **Test**, then **Import models**.
-3. **Admin → Models** — imported models start *disabled with price 0*. Set prices (USD per 1M tokens) and enable them. A model can have several endpoints (providers) for fallback.
-4. **Admin → Users** — give yourself some credits (or create redeem codes).
-5. **API Keys** — create a key and call the API.
+- **docker compose**: `docker compose up -d` with this repository's [`docker-compose.yml`](docker-compose.yml).
+- **Binary**: download one from [Releases](https://github.com/local4a/plexrouter/releases) and run `./plexrouter`.
+- **From source** (Go 1.23+, Node.js 20+): `git clone https://github.com/local4a/plexrouter.git && cd plexrouter && make build && ./bin/plexrouter`.
 
 ## Production deployment (single server with Docker)
 
-Any Linux server with Docker works; one instance with SQLite comfortably handles a team or a small public service.
+Any Linux server with Docker works; one instance with SQLite comfortably handles a team or a small public service. Start it as in [Quick start](#quick-start), run the setup wizard, then:
 
-```bash
-git clone https://github.com/local4a/plexrouter.git && cd plexrouter
-cp .env.example .env
-```
+- **HTTPS**: put a reverse proxy in front, publish the container on `127.0.0.1:8080:8080` only, and in **Admin → System settings** set the *public URL* (e.g. `https://api.example.com`) and turn on *trust proxy*. With [Caddy](https://caddyserver.com) (automatic certificates), `/etc/caddy/Caddyfile`:
 
-Edit `.env`:
+  ```
+  api.example.com {
+  	reverse_proxy 127.0.0.1:8080 {
+  		flush_interval -1
+  	}
+  }
+  ```
 
-- `PLEXROUTER_SECRET` — set it to the output of `openssl rand -hex 32` and keep a copy. It encrypts provider API keys; losing or changing it makes them unreadable.
-- `PLEXROUTER_GITHUB_CLIENT_ID` / `_SECRET` and/or `PLEXROUTER_GOOGLE_CLIENT_ID` / `_SECRET`, plus `PLEXROUTER_PUBLIC_URL` (e.g. `https://api.example.com`) — sign-in; see [Sign in with Google / GitHub](#sign-in-with-google--github).
-- `PLEXROUTER_ADMIN_EMAILS` — your email, so you become admin no matter who signs in first.
-- `PLEXROUTER_ALLOW_REGISTER=false` — if only existing accounts (and listed admins) may sign in.
-- `HTTPS_PROXY` — if the server can't reach the model APIs directly.
+  With nginx, make sure streaming isn't buffered or cut off: `proxy_buffering off;`, `proxy_read_timeout 600s;`, `client_max_body_size 50m;`. If you set up sign-in on `http://localhost` first, update the callback URL in your GitHub/Google OAuth app to the HTTPS address.
+- **No direct internet access to the model APIs** (e.g. servers in mainland China): pass an outbound proxy with `-e HTTPS_PROXY=http://proxy:port`, or use domestic providers (DeepSeek, Qwen, Doubao…, type `openai_compatible`). If pulling from `ghcr.io` is slow, build on the server: `git clone … && docker compose up -d --build`.
+- **Upgrade**: `docker pull ghcr.io/local4a/plexrouter:latest`, then recreate the container (`docker compose pull && docker compose up -d`). Migrations run automatically; read [CHANGELOG.md](CHANGELOG.md) first.
+- **Backup**: everything lives in the `plexrouter_data` volume, including the database and `secret.key`, which encrypts provider keys:
 
-```bash
-docker compose up -d          # or: docker compose up -d --build  (build from source)
-docker compose logs -f
-```
-
-**HTTPS.** Put a reverse proxy in front, change the port mapping in `docker-compose.yml` to `127.0.0.1:8080:8080`, and set `PLEXROUTER_TRUST_PROXY=true`. With [Caddy](https://caddyserver.com) (automatic certificates), `/etc/caddy/Caddyfile`:
-
-```
-api.example.com {
-	reverse_proxy 127.0.0.1:8080 {
-		flush_interval -1
-	}
-}
-```
-
-With nginx, make sure streaming isn't buffered or cut off: `proxy_buffering off;`, `proxy_read_timeout 600s;`, `client_max_body_size 50m;`.
-
-**Upgrade.** Migrations run automatically on start:
-
-```bash
-docker compose pull && docker compose up -d
-```
-
-**Backup.** Everything lives in the `plexrouter_data` volume (database + `secret.key`):
-
-```bash
-docker compose stop
-docker run --rm -v plexrouter_data:/data -v "$PWD":/backup alpine tar czf /backup/plexrouter-$(date +%F).tgz -C /data .
-docker compose start
-```
+  ```bash
+  docker stop plexrouter
+  docker run --rm -v plexrouter_data:/data -v "$PWD":/backup alpine tar czf /backup/plexrouter-$(date +%F).tgz -C /data .
+  docker start plexrouter
+  ```
 
 ## Using the API
 
@@ -167,35 +120,28 @@ claude
 
 ## Configuration
 
-Everything is configured with environment variables (see [`.env.example`](.env.example)); providers and models are managed in the console.
+Everything is configured in the console, under **Admin → System settings**: site name, public URL, GitHub/Google sign-in, registration, signup credit, default rate limit, request timeout, log retention and proxy trust. Providers, models, users and prices have their own admin pages.
+
+Environment variables are **optional**. They suit automated deployments, and a value saved in the console overrides them:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PLEXROUTER_ADDR` | `:8080` | Listen address |
-| `PLEXROUTER_DATA_DIR` | `./data` | Directory for the SQLite database and generated secret |
-| `PLEXROUTER_DB` | `$DATA_DIR/plexrouter.db` | Database file |
-| `PLEXROUTER_SECRET` | generated | Encrypts provider keys at rest. Auto-generated into `$DATA_DIR/secret.key` if unset — back it up |
-| `PLEXROUTER_NAME` | `PlexRouter` | Name shown in the console |
-| `PLEXROUTER_ALLOW_REGISTER` | `true` | Create accounts for new Google/GitHub users |
-| `PLEXROUTER_SIGNUP_CREDIT` | `0` | USD credited to new accounts |
-| `PLEXROUTER_ADMIN_EMAILS` | | Comma-separated emails that are always admins (can sign up even when registration is closed). If unset, the first user is admin |
-| `PLEXROUTER_REQUEST_TIMEOUT` | `10m` | Upper bound for one upstream request |
-| `PLEXROUTER_TRUST_PROXY` | `false` | Use `X-Forwarded-For` for client IPs (behind a reverse proxy) |
-| `PLEXROUTER_PUBLIC_URL` | from request | Public base URL, used for OAuth callbacks |
-| `PLEXROUTER_GOOGLE_CLIENT_ID` / `_SECRET` | | Enable “Sign in with Google” |
-| `PLEXROUTER_GITHUB_CLIENT_ID` / `_SECRET` | | Enable “Sign in with GitHub” |
+| `PLEXROUTER_ADDR` | `:8080` | Listen address (also `PORT`) |
+| `PLEXROUTER_DATA_DIR` | `./data` (`/data` in Docker) | Directory for the SQLite database and generated secret |
+| `PLEXROUTER_SECRET` | generated | Encrypts provider keys at rest; generated into the data directory if unset. Back it up |
+| `PLEXROUTER_ADMIN_EMAILS` | | Comma-separated emails that always become admins when they sign in |
 | `PLEXROUTER_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `PLEXROUTER_DEFAULT_USER_RPM` | `0` | Requests per minute per user unless set on the user (0 = unlimited) |
-| `PLEXROUTER_LOG_RETENTION_DAYS` | `90` | Delete request logs older than this (0 = keep forever). Reports only cover kept logs |
+| `HTTPS_PROXY` / `NO_PROXY` | | Outbound proxy for upstream model APIs |
+| `PLEXROUTER_NAME`, `PLEXROUTER_PUBLIC_URL`, `PLEXROUTER_ALLOW_REGISTER`, `PLEXROUTER_SIGNUP_CREDIT`, `PLEXROUTER_DEFAULT_USER_RPM`, `PLEXROUTER_REQUEST_TIMEOUT`, `PLEXROUTER_LOG_RETENTION_DAYS`, `PLEXROUTER_TRUST_PROXY`, `PLEXROUTER_GITHUB_CLIENT_ID`/`_SECRET`, `PLEXROUTER_GOOGLE_CLIENT_ID`/`_SECRET` | | Initial values for the console settings of the same name |
 
 ### Sign in with Google / GitHub
 
-Sign-in is only through Google and/or GitHub — configure at least one, or nobody can log in to the console. Each button appears on the login page once its client ID and secret are set. The callback URL is `<PLEXROUTER_PUBLIC_URL>/api/auth/oauth/<provider>/callback`. Set `PLEXROUTER_PUBLIC_URL` to the address users open, e.g. `https://api.example.com`. If it is unset, the address is taken from the request.
+Users sign in only with Google and/or GitHub; there are no passwords. The setup wizard and **Admin → System settings** show the callback URL to register for each provider (`<public URL>/api/auth/oauth/<provider>/callback`):
 
-- **Google**: [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) → *Create credentials → OAuth client ID → Web application*. Add `https://api.example.com/api/auth/oauth/google/callback` as an authorized redirect URI, then set `PLEXROUTER_GOOGLE_CLIENT_ID` / `PLEXROUTER_GOOGLE_CLIENT_SECRET`.
-- **GitHub**: [Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers). Set the authorization callback URL to `https://api.example.com/api/auth/oauth/github/callback`, then set `PLEXROUTER_GITHUB_CLIENT_ID` / `PLEXROUTER_GITHUB_CLIENT_SECRET`.
+- **GitHub**: [New OAuth App](https://github.com/settings/applications/new): homepage = your public URL, authorization callback URL = the one shown.
+- **Google**: [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) → *Create credentials → OAuth client ID → Web application*, with the shown URL as authorized redirect URI.
 
-A Google or GitHub account is linked to an existing PlexRouter account automatically when the verified email addresses match. Otherwise a new account is created, unless registration is disabled. Under **Settings**, users can connect or disconnect providers; they must keep at least one connected.
+A Google or GitHub account is linked to an existing PlexRouter account automatically when the verified email addresses match. Otherwise a new account is created, unless registration is disabled. Users can connect or disconnect providers under **Settings**; at least one must stay connected.
 
 ## How billing works
 

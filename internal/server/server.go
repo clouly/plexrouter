@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/local4a/plexrouter/internal/catalog"
@@ -32,18 +33,21 @@ type Server struct {
 	version string
 	web     fs.FS // built console (index.html + assets); may be empty
 	limiter *rateLimiter
-	oauth   map[string]*oauth.Provider // configured sign-in providers by name
 	catalog *catalog.Catalog
+
+	// oauthOverride replaces a configured sign-in provider (tests, custom endpoints).
+	oauthOverride map[string]*oauth.Provider
+
+	settingsMu sync.RWMutex
+	settings   map[string]string // saved in the console; see settings.go
 }
 
 func New(cfg *config.Config, st *store.Store, box *secure.Box, gw *gateway.Gateway, web fs.FS, version string, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, store: st, box: box, gw: gw, web: web, version: version, log: log,
-		limiter: newRateLimiter(20, time.Minute), oauth: map[string]*oauth.Provider{}, catalog: catalog.New()}
-	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
-		s.SetOAuthProvider(oauth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret))
-	}
-	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
-		s.SetOAuthProvider(oauth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret))
+		limiter: newRateLimiter(20, time.Minute), oauthOverride: map[string]*oauth.Provider{}, catalog: catalog.New(),
+		settings: map[string]string{}}
+	if err := s.reloadSettings(context.Background()); err != nil {
+		log.Error("load settings", "err", err)
 	}
 	return s
 }
@@ -53,6 +57,10 @@ func (s *Server) Handler() http.Handler {
 	s.gw.Register(mux)
 
 	mux.HandleFunc("GET /api/config", s.handleConfig)
+	mux.HandleFunc("GET /api/setup", s.handleSetupInfo)
+	mux.HandleFunc("POST /api/setup", s.limited(s.handleSetup))
+	mux.HandleFunc("GET /api/admin/settings", s.admin(s.handleGetSettings))
+	mux.HandleFunc("PATCH /api/admin/settings", s.admin(s.handlePatchSettings))
 	mux.HandleFunc("GET /api/models", s.handlePublicModels)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 
@@ -275,7 +283,7 @@ func (o *Optional[T]) UnmarshalJSON(b []byte) error {
 }
 
 func (s *Server) clientIP(r *http.Request) string {
-	if !s.cfg.TrustProxy {
+	if !s.trustProxy() {
 		return remoteHost(r)
 	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {

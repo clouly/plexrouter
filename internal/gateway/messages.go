@@ -76,7 +76,7 @@ func (g *Gateway) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), g.opts.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), g.options().Timeout)
 	defer cancel()
 	err = g.dispatch(ctx, c, cands, mr.stream, func(rt *route) error {
 		if mp, ok := rt.adapter.(provider.MessagesProvider); ok {
@@ -331,7 +331,7 @@ func (g *Gateway) handleCountTokens(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), g.opts.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), g.options().Timeout)
 	defer cancel()
 	for _, cand := range g.health.order(cands) {
 		p, keys, err := g.targets(ctx, cand.endpoint.ProviderID)

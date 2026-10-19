@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/local4a/plexrouter/internal/provider"
@@ -30,10 +31,24 @@ type Gateway struct {
 	store   *store.Store
 	box     *secure.Box
 	client  *http.Client
+	optsMu  sync.RWMutex
 	opts    Options
 	log     *slog.Logger
 	health  *health
 	limiter *rateLimiter
+}
+
+func (g *Gateway) options() Options {
+	g.optsMu.RLock()
+	defer g.optsMu.RUnlock()
+	return g.opts
+}
+
+// SetOptions applies changed settings to requests that start afterwards.
+func (g *Gateway) SetOptions(o Options) {
+	g.optsMu.Lock()
+	g.opts = o
+	g.optsMu.Unlock()
 }
 
 type Options struct {
@@ -362,7 +377,7 @@ func (g *Gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), g.opts.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), g.options().Timeout)
 	defer cancel()
 	promptEstimate := estimatePrompt(req)
 
@@ -534,7 +549,7 @@ func (g *Gateway) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), g.opts.Timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), g.options().Timeout)
 	defer cancel()
 
 	err = g.dispatch(ctx, c, cands, false, func(rt *route) error {

@@ -56,16 +56,17 @@ func scanUser(row interface{ Scan(...any) error }, extra ...any) (*User, error) 
 	return &u, nil
 }
 
-// insertUser creates a user. An empty role means admin for the very first
-// user and a regular user otherwise. Grants signupCredit, if positive.
+// insertUser creates a user. An empty role means admin while the instance
+// has no admin yet (the first sign-in after setup) and a regular user
+// otherwise. Grants signupCredit, if positive.
 func insertUser(ctx context.Context, tx *sql.Tx, email, name, role string, signupCredit int64) (int64, error) {
 	if role == "" {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		var admins int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = ?`, RoleAdmin).Scan(&admins); err != nil {
 			return 0, err
 		}
 		role = RoleUser
-		if count == 0 {
+		if admins == 0 {
 			role = RoleAdmin
 		}
 	}
@@ -99,6 +100,14 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
+}
+
+// HasAdmin reports whether any admin account exists; until one does, the
+// instance is in first-run setup.
+func (s *Store) HasAdmin(ctx context.Context) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE role = ?`, RoleAdmin).Scan(&n)
+	return n > 0, err
 }
 
 type UserWithStats struct {

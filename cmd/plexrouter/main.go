@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -52,11 +53,6 @@ func run() error {
 	}
 	defer st.Close()
 
-	if cfg.GoogleClientID == "" && cfg.GitHubClientID == "" {
-		log.Warn("no sign-in provider configured: set PLEXROUTER_GITHUB_CLIENT_ID/_SECRET or " +
-			"PLEXROUTER_GOOGLE_CLIENT_ID/_SECRET, otherwise nobody can log in to the console")
-	}
-
 	box, err := secure.NewBox(cfg.Secret)
 	if err != nil {
 		return err
@@ -73,11 +69,15 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go housekeeping(ctx, st, cfg.LogRetention)
+	go housekeeping(ctx, st, srv.LogRetentionDays)
 
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("PlexRouter listening", "addr", cfg.Addr, "version", version, "db", cfg.DatabasePath)
+		if hasAdmin, err := st.HasAdmin(ctx); err == nil && !hasAdmin {
+			port := cfg.Addr[strings.LastIndexByte(cfg.Addr, ':')+1:]
+			log.Info("first run: open the console in your browser to finish setup", "url", "http://localhost:"+port)
+		}
 		errc <- httpServer.ListenAndServe()
 	}()
 
@@ -97,14 +97,14 @@ func run() error {
 
 // housekeeping hourly removes expired sessions and request logs older than
 // the retention period (retentionDays 0 keeps logs forever).
-func housekeeping(ctx context.Context, st *store.Store, retentionDays int) {
+func housekeeping(ctx context.Context, st *store.Store, retention func() int) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
 		if err := st.PurgeExpiredSessions(ctx); err != nil && ctx.Err() == nil {
 			slog.Warn("purge sessions", "err", err)
 		}
-		if retentionDays > 0 {
+		if retentionDays := retention(); retentionDays > 0 {
 			n, err := st.PurgeLogs(ctx, time.Now().AddDate(0, 0, -retentionDays))
 			if err != nil && ctx.Err() == nil {
 				slog.Warn("purge request logs", "err", err)

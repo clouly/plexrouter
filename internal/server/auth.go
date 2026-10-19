@@ -87,8 +87,13 @@ func isHTTPS(r *http.Request) bool {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	ok(w, map[string]any{"name": s.cfg.Name, "version": s.version, "allow_register": s.cfg.AllowRegister,
-		"oauth_providers": s.oauthProviderNames()})
+	setup, err := s.setupRequired(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	ok(w, map[string]any{"name": s.siteName(), "version": s.version, "allow_register": s.allowRegister(),
+		"oauth_providers": s.oauthProviderNames(), "setup_required": setup})
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,7 @@
-# Single-server deployment. Settings come from .env next to this file
-# (copy .env.example); every one is optional.
+# Single-server deployment. Nothing needs configuring here: start it, open
+# http://localhost:8080 and follow the setup wizard; everything else is in the
+# console (Admin → System settings). The variables below are optional and are
+# read from a .env file next to this one if present (see .env.example).
 #
 #   docker compose up -d            # use the published image
 #   docker compose up -d --build    # or build from this checkout

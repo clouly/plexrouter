@@ -22,6 +22,11 @@ import type {
   ProviderUpdate,
   PublicModel,
   RedeemCode,
+  SetupInfo,
+  SetupInput,
+  SetupResult,
+  SystemSettingsInput,
+  SystemSettingsResponse,
   Transaction,
   UsageLog,
   UsageStats,
@@ -94,6 +99,10 @@ export const api = {
   config: () => get<AppConfig>("/api/config"),
   models: () => get<{ data: PublicModel[] }>("/api/models"),
 
+  // First-run setup (only while config.setup_required)
+  setup: () => get<SetupInfo>("/api/setup"),
+  completeSetup: (body: SetupInput) => post<SetupResult>("/api/setup", body),
+
   // Auth
   logout: () => post<Ok>("/api/auth/logout"),
   me: () => get<{ user: User }>("/api/me"),
@@ -114,6 +123,8 @@ export const api = {
 
   // Admin
   admin: {
+    settings: () => get<SystemSettingsResponse>("/api/admin/settings"),
+    updateSettings: (body: SystemSettingsInput) => patch<SystemSettingsResponse>("/api/admin/settings", body),
     stats: () => get<AdminStats>("/api/admin/stats"),
     report: (days: number) => get<AdminReport>("/api/admin/report", { days }),
     providers: () => get<{ data: Provider[] }>("/api/admin/providers"),
@@ -154,6 +165,11 @@ export function errorMessage(e: unknown): string {
   if (e instanceof ApiError) return translateErrorCode(e.code) ?? e.message;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/** The OAuth callback URL to register with a provider for a given public URL. */
+export function oauthCallbackUrl(publicUrl: string, provider: OAuthProvider): string {
+  return `${publicUrl.trim().replace(/\/+$/, "")}/api/auth/oauth/${provider}/callback`;
 }
 
 /** Browser navigation (not fetch) that starts a Google/GitHub sign-in or account link. */
