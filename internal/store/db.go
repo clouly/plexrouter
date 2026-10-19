@@ -49,6 +49,9 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// Ping checks that the database is usable.
+func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
 // migrations are applied in order; PRAGMA user_version records how many ran.
 // Never edit a released migration — append a new one.
 var migrations = []string{`

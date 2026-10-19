@@ -1,16 +1,33 @@
+# Single-server deployment. Settings come from .env next to this file
+# (copy .env.example); every one is optional.
+#
+#   docker compose up -d            # use the published image
+#   docker compose up -d --build    # or build from this checkout
+name: plexrouter
+
 services:
   plexrouter:
     image: ghcr.io/clouly/plexrouter:latest
     build: .
     restart: unless-stopped
     ports:
+      # Behind a reverse proxy on the same host, use "127.0.0.1:8080:8080".
       - "8080:8080"
     volumes:
-      - ./data:/data
+      - data:/data
     environment:
-      PLEXROUTER_NAME: PlexRouter
-      # PLEXROUTER_SECRET: change-me-to-a-long-random-string
-      # PLEXROUTER_ADMIN_EMAIL: admin@example.com
-      # PLEXROUTER_ADMIN_PASSWORD: change-me
-      # PLEXROUTER_ALLOW_REGISTER: "false"
-      # PLEXROUTER_TRUST_PROXY: "true"
+      PLEXROUTER_NAME: ${PLEXROUTER_NAME:-}
+      PLEXROUTER_SECRET: ${PLEXROUTER_SECRET:-}
+      PLEXROUTER_ALLOW_REGISTER: ${PLEXROUTER_ALLOW_REGISTER:-}
+      PLEXROUTER_SIGNUP_CREDIT: ${PLEXROUTER_SIGNUP_CREDIT:-}
+      PLEXROUTER_ADMIN_EMAIL: ${PLEXROUTER_ADMIN_EMAIL:-}
+      PLEXROUTER_ADMIN_PASSWORD: ${PLEXROUTER_ADMIN_PASSWORD:-}
+      PLEXROUTER_REQUEST_TIMEOUT: ${PLEXROUTER_REQUEST_TIMEOUT:-}
+      PLEXROUTER_TRUST_PROXY: ${PLEXROUTER_TRUST_PROXY:-}
+      PLEXROUTER_LOG_LEVEL: ${PLEXROUTER_LOG_LEVEL:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+
+volumes:
+  # Named volume (plexrouter_data): holds the SQLite database and secret.key.
+  data:

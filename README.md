@@ -21,7 +21,7 @@
 ### Docker
 
 ```bash
-docker run -d --name plexrouter -p 8080:8080 -v $(pwd)/data:/data ghcr.io/clouly/plexrouter:latest
+docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data ghcr.io/clouly/plexrouter:latest
 ```
 
 or with compose:
@@ -56,6 +56,53 @@ Then open <http://localhost:8080>:
 3. **Admin → Models** — imported models start *disabled with price 0*. Set prices (USD per 1M tokens) and enable them. A model can have several endpoints (providers) for fallback.
 4. **Admin → Users** — give yourself some credits (or create redeem codes).
 5. **API Keys** — create a key and call the API.
+
+## Production deployment (single server with Docker)
+
+Any Linux server with Docker works; one instance with SQLite comfortably handles a team or a small public service.
+
+```bash
+git clone https://github.com/clouly/plexrouter.git && cd plexrouter
+cp .env.example .env
+```
+
+Edit `.env`:
+
+- `PLEXROUTER_SECRET` — set it to the output of `openssl rand -hex 32` and keep a copy. It encrypts provider API keys; losing or changing it makes them unreadable.
+- `PLEXROUTER_ADMIN_EMAIL` / `PLEXROUTER_ADMIN_PASSWORD` — creates the admin on first start.
+- `PLEXROUTER_ALLOW_REGISTER=false` — if only invited users should have accounts.
+- `HTTPS_PROXY` — if the server can't reach the model APIs directly.
+
+```bash
+docker compose up -d          # or: docker compose up -d --build  (build from source)
+docker compose logs -f
+```
+
+**HTTPS.** Put a reverse proxy in front, change the port mapping in `docker-compose.yml` to `127.0.0.1:8080:8080`, and set `PLEXROUTER_TRUST_PROXY=true`. With [Caddy](https://caddyserver.com) (automatic certificates), `/etc/caddy/Caddyfile`:
+
+```
+api.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}
+```
+
+With nginx, make sure streaming isn't buffered or cut off: `proxy_buffering off;`, `proxy_read_timeout 600s;`, `client_max_body_size 50m;`.
+
+**Upgrade.** Migrations run automatically on start:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+**Backup.** Everything lives in the `plexrouter_data` volume (database + `secret.key`):
+
+```bash
+docker compose stop
+docker run --rm -v plexrouter_data:/data -v "$PWD":/backup alpine tar czf /backup/plexrouter-$(date +%F).tgz -C /data .
+docker compose start
+```
 
 ## Using the API
 
@@ -110,8 +157,6 @@ Everything is configured with environment variables (see [`.env.example`](.env.e
 | `PLEXROUTER_TRUST_PROXY` | `false` | Use `X-Forwarded-For` for client IPs (behind a reverse proxy) |
 | `PLEXROUTER_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
-When running behind a reverse proxy (nginx, Caddy), disable response buffering for streaming — PlexRouter already sends `X-Accel-Buffering: no` for nginx.
-
 ## How billing works
 
 - Each model has an input and output price in **USD per 1M tokens**. Cost = `prompt_tokens × input_price + completion_tokens × output_price`, using the token counts reported by the upstream (estimated only if the upstream reports none).
@@ -147,7 +192,6 @@ make test       # Go tests (end-to-end against fake upstreams)
 - Per-key rate limits and model allow-lists
 - More providers: Azure OpenAI, AWS Bedrock, Vertex AI
 - Load balancing by weight and health-based routing
-- PostgreSQL support
 
 Contributions are welcome — please open an issue to discuss larger changes first.
 

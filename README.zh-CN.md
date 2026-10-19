@@ -21,7 +21,7 @@
 ### Docker
 
 ```bash
-docker run -d --name plexrouter -p 8080:8080 -v $(pwd)/data:/data ghcr.io/clouly/plexrouter:latest
+docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data ghcr.io/clouly/plexrouter:latest
 ```
 
 或使用 compose：
@@ -56,6 +56,55 @@ make build        # 构建控制台到 web/dist，构建服务端到 bin/
 3. **管理 → 模型管理** —— 导入的模型默认 *禁用且价格为 0*，设置价格（美元 / 百万 token）后启用。一个模型可以配置多个供应商实现回退。
 4. **管理 → 用户** —— 给自己加点余额（或生成兑换码）。
 5. **API Keys** —— 创建 Key 并调用接口。
+
+## 生产部署（单台服务器 + Docker）
+
+任何装了 Docker 的 Linux 服务器都可以。单实例 + SQLite 足够支撑一个团队或小规模的对外服务。
+
+```bash
+git clone https://github.com/clouly/plexrouter.git && cd plexrouter
+cp .env.example .env
+```
+
+编辑 `.env`：
+
+- `PLEXROUTER_SECRET` —— 填 `openssl rand -hex 32` 的输出并妥善保存。它用来加密供应商 API Key，丢失或修改后已保存的 Key 将无法解密。
+- `PLEXROUTER_ADMIN_EMAIL` / `PLEXROUTER_ADMIN_PASSWORD` —— 首次启动时创建管理员。
+- `PLEXROUTER_ALLOW_REGISTER=false` —— 不想开放注册时设置。
+- `HTTPS_PROXY` —— 服务器无法直连模型接口时（例如国内服务器访问 OpenAI / Anthropic / Google）设置出站代理；或者只接入国内模型（DeepSeek、通义千问、豆包等，类型选 `openai_compatible`）。
+
+```bash
+docker compose up -d          # 或：docker compose up -d --build（从源码构建镜像）
+docker compose logs -f
+```
+
+国内服务器拉取 `ghcr.io` 镜像较慢时，可以直接用 `docker compose up -d --build` 在服务器上构建。
+
+**HTTPS。** 在前面加一层反向代理，把 `docker-compose.yml` 里的端口映射改成 `127.0.0.1:8080:8080`，并设置 `PLEXROUTER_TRUST_PROXY=true`。用 [Caddy](https://caddyserver.com)（自动申请证书）时，`/etc/caddy/Caddyfile`：
+
+```
+api.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}
+```
+
+用 nginx 时注意不要缓冲或过早断开流式响应：`proxy_buffering off;`、`proxy_read_timeout 600s;`、`client_max_body_size 50m;`。
+
+**升级。** 启动时会自动执行数据库迁移：
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+**备份。** 所有数据都在 `plexrouter_data` 卷里（数据库 + `secret.key`）：
+
+```bash
+docker compose stop
+docker run --rm -v plexrouter_data:/data -v "$PWD":/backup alpine tar czf /backup/plexrouter-$(date +%F).tgz -C /data .
+docker compose start
+```
 
 ## 调用示例
 
@@ -107,8 +156,6 @@ print(resp.choices[0].message.content)
 | `PLEXROUTER_TRUST_PROXY` | `false` | 在反向代理后时，用 `X-Forwarded-For` 取客户端 IP |
 | `PLEXROUTER_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
 
-放在 nginx / Caddy 等反向代理后面时，请关闭响应缓冲以支持流式输出（PlexRouter 已为 nginx 发送 `X-Accel-Buffering: no`）。
-
 ## 计费规则
 
 - 每个模型设置输入、输出价格（**美元 / 百万 token**）。费用 = `prompt_tokens × 输入价 + completion_tokens × 输出价`，token 数以上游返回为准（上游不返回时才估算）。
@@ -144,7 +191,6 @@ make test       # Go 测试（使用模拟上游的端到端测试）
 - 按 Key 限流、模型白名单
 - 更多供应商：Azure OpenAI、AWS Bedrock、Vertex AI
 - 按权重负载均衡、基于健康度的路由
-- PostgreSQL 支持
 
 欢迎贡献代码，较大的改动请先开 issue 讨论。
 

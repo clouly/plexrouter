@@ -43,7 +43,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("GET /api/models", s.handlePublicModels)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /healthz", s.handleHealth)
 
 	mux.HandleFunc("POST /api/auth/register", s.limited(s.handleRegister))
 	mux.HandleFunc("POST /api/auth/login", s.limited(s.handleLogin))
@@ -198,6 +198,18 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.log.Error("request failed", "path", r.URL.Path, "err", err)
 		writeErr(w, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
+}
+
+// handleHealth backs the Docker HEALTHCHECK: 200 only while the database is usable.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.store.Ping(ctx); err != nil {
+		s.log.Warn("health check failed", "err", err)
+		http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Write([]byte("ok"))
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
