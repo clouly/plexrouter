@@ -2,7 +2,7 @@
 
 All notable changes to PlexRouter are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/) (before 1.0, minor versions may contain breaking changes).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-19
 
 ### Added
 
@@ -55,6 +55,6 @@ All notable changes to PlexRouter are listed here. The format follows [Keep a Ch
 
 First release: OpenAI-compatible gateway (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`) with adapters for OpenAI(-compatible), Anthropic and Gemini; model routing with fallback; API keys, prepaid credits and per-token billing; redeem codes; web console; SQLite; Docker image.
 
-[Unreleased]: https://github.com/local4a/plexrouter/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/local4a/plexrouter/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/local4a/plexrouter/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/local4a/plexrouter/releases/tag/v0.1.0
