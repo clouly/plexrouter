@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/mail"
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/clouly/plexrouter/internal/secure"
 	"github.com/clouly/plexrouter/internal/store"
@@ -18,7 +15,6 @@ import (
 const (
 	sessionCookie = "plex_session"
 	sessionTTL    = 30 * 24 * time.Hour
-	minPassword   = 8
 )
 
 type ctxKey struct{}
@@ -95,90 +91,6 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"oauth_providers": s.oauthProviderNames()})
 }
 
-type credentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
-}
-
-func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	var in credentials
-	if !decode(w, r, &in) {
-		return
-	}
-	n, err := s.store.CountUsers(r.Context())
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	// The first account (the admin) can always be created.
-	if !s.cfg.AllowRegister && n > 0 {
-		writeErr(w, http.StatusForbidden, "registration_closed", "registration is disabled")
-		return
-	}
-	in.Email = strings.TrimSpace(in.Email)
-	if addr, err := mail.ParseAddress(in.Email); err != nil || addr.Address != in.Email {
-		writeErr(w, http.StatusBadRequest, "invalid_email", "invalid email address")
-		return
-	}
-	if len(in.Password) < minPassword {
-		writeErr(w, http.StatusBadRequest, "weak_password", "password must be at least 8 characters")
-		return
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		name, _, _ = strings.Cut(in.Email, "@")
-	}
-	u, err := s.store.CreateUser(r.Context(), in.Email, name, string(hash), store.FromUSD(s.cfg.SignupCredit))
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if err := s.startSession(w, r, u); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	ok(w, map[string]any{"user": userDTO(u)})
-}
-
-// dummyHash keeps login timing similar for unknown emails.
-var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("plexrouter-dummy-password"), bcrypt.DefaultCost)
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var in credentials
-	if !decode(w, r, &in) {
-		return
-	}
-	u, err := s.store.GetUserByEmail(r.Context(), in.Email)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, r, err)
-		return
-	}
-	if u == nil || !u.HasPassword() {
-		bcrypt.CompareHashAndPassword(dummyHash, []byte(in.Password))
-		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
-		return
-	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
-		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
-		return
-	}
-	if u.Disabled {
-		writeErr(w, http.StatusForbidden, "account_disabled", "this account is disabled")
-		return
-	}
-	if err := s.startSession(w, r, u); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	ok(w, map[string]any{"user": userDTO(u)})
-}
-
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if hash := sessionHash(r); hash != "" {
 		s.store.DeleteSession(r.Context(), hash)
@@ -192,39 +104,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]any{"user": userDTO(currentUser(r))})
 }
 
-func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Old string `json:"old_password"`
-		New string `json:"new_password"`
-	}
-	if !decode(w, r, &in) {
-		return
-	}
-	u := currentUser(r)
-	// OAuth-only accounts set their first password without an old one.
-	if u.HasPassword() && bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Old)) != nil {
-		writeErr(w, http.StatusBadRequest, "wrong_password", "current password is incorrect")
-		return
-	}
-	if len(in.New) < minPassword {
-		writeErr(w, http.StatusBadRequest, "weak_password", "password must be at least 8 characters")
-		return
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.New), bcrypt.DefaultCost)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if err := s.store.SetPassword(r.Context(), u.ID, string(hash)); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	s.store.DeleteOtherSessions(r.Context(), u.ID, sessionHash(r))
-	ok(w, map[string]any{"ok": true})
-}
-
-// rateLimiter is a fixed-window limiter keyed by client IP, used for login
-// and registration.
+// rateLimiter is a fixed-window limiter keyed by client IP, used for
+// sign-in and redeeming codes.
 type rateLimiter struct {
 	mu     sync.Mutex
 	limit  int

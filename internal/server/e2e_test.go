@@ -6,22 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
-	"time"
 
-	"github.com/clouly/plexrouter/internal/config"
 	"github.com/clouly/plexrouter/internal/gateway"
-	"github.com/clouly/plexrouter/internal/secure"
-	"github.com/clouly/plexrouter/internal/server"
-	"github.com/clouly/plexrouter/internal/store"
 )
 
 // --- fake upstreams ---
@@ -201,21 +193,17 @@ func get(m map[string]any, path ...string) any {
 	return v
 }
 
-func setup(t *testing.T) (*client, *store.Store) {
-	dir := t.TempDir()
-	cfg := &config.Config{Name: "Test", AllowRegister: true, SignupCredit: 0, DataDir: dir, RequestTimeout: 30 * time.Second}
-	st, err := store.Open(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatal(err)
+// setup starts a server whose console sign-in goes through a fake GitHub,
+// and signs in the first user (the admin).
+func setup(t *testing.T) (*client, *oauthEnv, *fakeIdP) {
+	idp := newFakeIdP(t)
+	env := newOAuthEnv(t, idp)
+	idp.add("admin", fakeAccount{sub: "1", email: "admin@example.com", name: "Admin", verified: true})
+	c := env.browser()
+	if to := env.signIn(c, "github", "login", "admin"); to != "/" {
+		t.Fatalf("admin sign-in → %q", to)
 	}
-	t.Cleanup(func() { st.Close() })
-	box, _ := secure.NewBox("test-secret")
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	gw := gateway.New(st, box, cfg.RequestTimeout, log)
-	web := fstest.MapFS{"index.html": {Data: []byte("<html>console</html>")}}
-	srv := httptest.NewServer(server.New(cfg, st, box, gw, web, "test", log).Handler())
-	t.Cleanup(srv.Close)
-	return newClient(t, srv.URL), st
+	return c, env, idp
 }
 
 func approx(a, b float64) bool { return math.Abs(a-b) < 1e-12 }
@@ -289,10 +277,10 @@ func TestEndToEnd(t *testing.T) {
 	defer an.Close()
 	defer ge.Close()
 	defer bad.Close()
-	c, _ := setup(t)
+	c, env, idp := setup(t)
 
-	// First registered user is admin.
-	me := c.must("POST", "/api/auth/register", "", map[string]any{"email": "admin@example.com", "password": "password123"})
+	// The first user to sign in is admin.
+	me := c.must("GET", "/api/me", "", nil)
 	if get(me, "user", "role") != "admin" {
 		t.Fatalf("first user should be admin: %v", me)
 	}
@@ -480,8 +468,10 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// A second user is not an admin and cannot reach admin routes.
-	u2 := newClient(t, c.base)
-	me2 := u2.must("POST", "/api/auth/register", "", map[string]any{"email": "bob@example.com", "password": "password123"})
+	idp.add("bob", fakeAccount{sub: "2", email: "bob@example.com", name: "Bob", verified: true})
+	u2 := env.browser()
+	env.signIn(u2, "github", "login", "bob")
+	me2 := u2.must("GET", "/api/me", "", nil)
 	if get(me2, "user", "role") != "user" {
 		t.Errorf("second user role = %v", get(me2, "user", "role"))
 	}

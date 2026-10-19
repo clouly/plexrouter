@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, errorMessage, startOAuth } from "../api";
 import { useAuth } from "../auth";
@@ -6,10 +6,10 @@ import { LOCALES, isLang, translateErrorCode, useI18n } from "../i18n";
 import { useAsync, useDocumentTitle, type AsyncState } from "../lib/hooks";
 import { formatDate } from "../lib/format";
 import { OAUTH_PROVIDERS, type Identity, type OAuthProvider } from "../types";
-import { Card, Notice, PageHeader } from "../components/Card";
+import { Card, PageHeader } from "../components/Card";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
-import { Input, Select } from "../components/Input";
+import { Select } from "../components/Input";
 import { useToast } from "../components/Toast";
 import { useConfirm } from "../components/Dialog";
 import { Spinner } from "../components/Spinner";
@@ -43,7 +43,6 @@ export function SettingsPage() {
 
         {providers.length > 0 && <ConnectedAccountsCard providers={providers} identities={identities} />}
 
-        <PasswordCard />
 
         <Card title={t("settings.preferences")}>
           <Select
@@ -179,73 +178,6 @@ function ConnectedAccountsCard({
           })}
         </ul>
       )}
-    </Card>
-  );
-}
-
-function PasswordCard() {
-  const { t } = useI18n();
-  const toast = useToast();
-  const { user, refreshUser } = useAuth();
-  // Treat a missing field (older server) as "has a password".
-  const hasPassword = user?.has_password !== false;
-  const [oldPw, setOldPw] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
-    if ((hasPassword && !oldPw) || !newPw) return setError(t("auth.fillAll"));
-    if (newPw.length < 8) return setError(t("auth.passwordTooShort"));
-    if (newPw !== confirm) return setError(t("auth.passwordMismatch"));
-    setBusy(true);
-    setError("");
-    try {
-      await api.changePassword(hasPassword ? { old_password: oldPw, new_password: newPw } : { new_password: newPw });
-      toast.success(hasPassword ? t("settings.passwordChanged") : t("settings.passwordSet"));
-      setOldPw("");
-      setNewPw("");
-      setConfirm("");
-      if (!hasPassword) await refreshUser();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Card
-      title={hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
-      description={hasPassword ? t("settings.changePasswordDesc") : t("settings.setPasswordDesc")}
-    >
-      <form onSubmit={submit} className="flex max-w-sm flex-col gap-4" noValidate>
-        {error && (
-          <div role="alert">
-            <Notice tone="danger">{error}</Notice>
-          </div>
-        )}
-        {hasPassword && (
-          <Input label={t("settings.currentPassword")} type="password" autoComplete="current-password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} disabled={busy} />
-        )}
-        <Input
-          label={t("settings.newPassword")}
-          type="password"
-          autoComplete="new-password"
-          value={newPw}
-          onChange={(e) => setNewPw(e.target.value)}
-          disabled={busy}
-          hint={t("auth.passwordHint")}
-        />
-        <Input label={t("auth.confirmPassword")} type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={busy} />
-        <div>
-          <Button type="submit" variant="primary" loading={busy}>
-            {hasPassword ? t("settings.updatePassword") : t("settings.setPasswordButton")}
-          </Button>
-        </div>
-      </form>
     </Card>
   );
 }

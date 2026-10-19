@@ -123,7 +123,8 @@ func newOAuthEnv(t *testing.T, idp *fakeIdP) *oauthEnv {
 	t.Cleanup(func() { st.Close() })
 	box, _ := secure.NewBox("test-secret")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := server.New(cfg, st, box, gateway.New(st, box, cfg.RequestTimeout, log), fstest.MapFS{}, "test", log)
+	web := fstest.MapFS{"index.html": {Data: []byte("<html>console</html>")}}
+	srv := server.New(cfg, st, box, gateway.New(st, box, cfg.RequestTimeout, log), web, "test", log)
 	srv.SetOAuthProvider(idp.provider(oauth.Google))
 	srv.SetOAuthProvider(idp.provider(oauth.GitHub))
 	hs := httptest.NewServer(srv.Handler())
@@ -189,6 +190,8 @@ func TestOAuth(t *testing.T) {
 	idp.add("bob-gh", fakeAccount{sub: "202", email: "bob@example.com", name: "bobby", verified: true})
 	idp.add("eve-g", fakeAccount{sub: "g-eve", email: "eve@example.com", name: "Eve", verified: false})
 	idp.add("carol-g", fakeAccount{sub: "g-carol", email: "carol@example.com", name: "Carol", verified: true})
+	idp.add("bob-g", fakeAccount{sub: "g-bob", email: "bob@example.com", name: "Bob", verified: true})
+	idp.add("dave-g", fakeAccount{sub: "g-dave", email: "dave@example.com", name: "Dave", verified: true})
 
 	cfg := map[string]any{}
 	json.Unmarshal(must(t, e.browser(), "GET", "/api/config"), &cfg)
@@ -196,13 +199,13 @@ func TestOAuth(t *testing.T) {
 		t.Fatalf("oauth_providers = %v", cfg["oauth_providers"])
 	}
 
-	// New account via Google: first user, admin, no password.
+	// New account via Google: the first user becomes admin.
 	alice := e.browser()
 	if to := e.signIn(alice, "google", "login", "alice-g"); to != "/" {
 		t.Fatalf("google sign-in redirected to %q", to)
 	}
 	me := e.me(alice)
-	if me["email"] != "alice@example.com" || me["role"] != "admin" || me["has_password"] != false || me["name"] != "Alice" {
+	if me["email"] != "alice@example.com" || me["role"] != "admin" || me["name"] != "Alice" {
 		t.Fatalf("me = %v", me)
 	}
 	aliceID := me["id"]
@@ -245,13 +248,18 @@ func TestOAuth(t *testing.T) {
 		t.Errorf("link without session → %q", to)
 	}
 
-	// Password user Bob links GitHub from settings, then unlinks it.
+	// Bob signs up with Google, links GitHub from settings, then unlinks it.
 	bob := e.browser()
-	bob.must("POST", "/api/auth/register", "", map[string]any{"email": "bob@example.com", "password": "password123"})
+	if to := e.signIn(bob, "google", "login", "bob-g"); to != "/" {
+		t.Fatalf("bob sign-in → %q", to)
+	}
+	if e.me(bob)["role"] != "user" {
+		t.Errorf("second user role = %v", e.me(bob)["role"])
+	}
 	if to := e.signIn(bob, "github", "link", "bob-gh"); to != "/settings?linked=github" {
 		t.Fatalf("link → %q", to)
 	}
-	if ids := bob.must("GET", "/api/me/identities", "", nil)["data"].([]any); len(ids) != 1 {
+	if ids := bob.must("GET", "/api/me/identities", "", nil)["data"].([]any); len(ids) != 2 {
 		t.Fatalf("bob identities = %v", ids)
 	}
 	// Bob can't take over Alice's Google account.
@@ -260,20 +268,14 @@ func TestOAuth(t *testing.T) {
 	}
 	bob.must("DELETE", "/api/me/identities/github", "", nil)
 
-	// Alice has no password: she may drop one identity but not the last.
+	// The last sign-in method can't be removed.
 	alice.must("DELETE", "/api/me/identities/github", "", nil)
 	if status, b := alice.do("DELETE", "/api/me/identities/google", "", nil); status != 400 || !strings.Contains(string(b), "last_login_method") {
 		t.Errorf("unlink last method = %d %s", status, b)
 	}
-	// She sets a first password without an old one, then can log in with it.
-	alice.must("POST", "/api/me/password", "", map[string]any{"new_password": "alicepass1"})
-	if e.me(alice)["has_password"] != true {
-		t.Error("has_password not set")
-	}
-	e.browser().must("POST", "/api/auth/login", "", map[string]any{"email": "alice@example.com", "password": "alicepass1"})
-	// Password-less accounts can't be logged into with an empty password.
-	if status, _ := e.browser().do("POST", "/api/auth/login", "", map[string]any{"email": "carol@example.com", "password": ""}); status != 401 {
-		t.Errorf("empty password login = %d", status)
+	// Password endpoints are gone.
+	if status, _ := e.browser().do("POST", "/api/auth/login", "", map[string]any{"email": "alice@example.com", "password": "x"}); status != 404 {
+		t.Errorf("password login status = %d", status)
 	}
 
 	// Closed registration blocks new accounts but not existing ones.
@@ -285,12 +287,29 @@ func TestOAuth(t *testing.T) {
 		t.Errorf("existing user with closed registration → %q", to)
 	}
 
+	// Listed admin emails may always sign up and become admins; existing
+	// listed users are promoted on their next sign-in.
+	e.cfg.AdminEmails = []string{"carol@example.com", "bob@example.com"}
+	carol := e.browser()
+	if to := e.signIn(carol, "google", "login", "carol-g"); to != "/" || e.me(carol)["role"] != "admin" {
+		t.Errorf("listed admin sign-up → %q, role %v", to, e.me(carol)["role"])
+	}
+	bob2 := e.browser()
+	e.signIn(bob2, "google", "login", "bob-g")
+	if e.me(bob2)["role"] != "admin" {
+		t.Errorf("listed existing user not promoted: %v", e.me(bob2)["role"])
+	}
+	e.cfg.AllowRegister = true
+	dave := e.browser()
+	e.signIn(dave, "google", "login", "dave-g")
+	if e.me(dave)["role"] != "user" {
+		t.Errorf("unlisted user with an admin list = %v", e.me(dave)["role"])
+	}
+
 	// Disabled accounts can't sign in.
-	bobID := int64(e.me(bob)["id"].(float64))
 	disabled := true
-	e.st.UpdateUser(context.Background(), bobID, store.UserUpdate{Disabled: &disabled})
-	e.st.LinkIdentity(context.Background(), store.Identity{UserID: bobID, Provider: "github", Subject: "202"})
-	if to := e.signIn(e.browser(), "github", "login", "bob-gh"); to != "/login?oauth_error=account_disabled" {
+	e.st.UpdateUser(context.Background(), int64(e.me(bob2)["id"].(float64)), store.UserUpdate{Disabled: &disabled})
+	if to := e.signIn(e.browser(), "google", "login", "bob-g"); to != "/login?oauth_error=account_disabled" {
 		t.Errorf("disabled → %q", to)
 	}
 }

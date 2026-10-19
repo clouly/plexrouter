@@ -26,9 +26,6 @@ type User struct {
 
 func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
 
-// HasPassword is false for accounts created through OAuth that never set one.
-func (u *User) HasPassword() bool { return u.PasswordHash != "" }
-
 var ErrEmailTaken = errors.New("email already registered")
 
 const userCols = `id, email, name, password_hash, role, balance, disabled, created_at`
@@ -47,34 +44,22 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	return &u, nil
 }
 
-// CreateUser inserts a user. The very first user becomes an admin. A positive
-// signupCredit is granted and recorded as a transaction. An empty
-// passwordHash creates an account that can only sign in through OAuth.
-func (s *Store) CreateUser(ctx context.Context, email, name, passwordHash string, signupCredit int64) (*User, error) {
-	var id int64
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		var err error
-		id, err = insertUser(ctx, tx, email, name, passwordHash, signupCredit)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.GetUser(ctx, id)
-}
-
-func insertUser(ctx context.Context, tx *sql.Tx, email, name, passwordHash string, signupCredit int64) (int64, error) {
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		return 0, err
-	}
-	role := RoleUser
-	if count == 0 {
-		role = RoleAdmin
+// insertUser creates a user. An empty role means admin for the very first
+// user and a regular user otherwise. Grants signupCredit, if positive.
+func insertUser(ctx context.Context, tx *sql.Tx, email, name, role string, signupCredit int64) (int64, error) {
+	if role == "" {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+			return 0, err
+		}
+		role = RoleUser
+		if count == 0 {
+			role = RoleAdmin
+		}
 	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO users (email, name, password_hash, role, balance, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		strings.ToLower(strings.TrimSpace(email)), name, passwordHash, role, max(signupCredit, 0), now())
+		strings.ToLower(strings.TrimSpace(email)), name, "", role, max(signupCredit, 0), now())
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return 0, ErrEmailTaken
@@ -176,11 +161,6 @@ func (s *Store) UpdateUser(ctx context.Context, id int64, upd UserUpdate) (*User
 	return s.GetUser(ctx, id)
 }
 
-func (s *Store) SetPassword(ctx context.Context, id int64, hash string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, hash, id)
-	return err
-}
-
 // AdjustBalance adds amount (may be negative) to a user's balance and records
 // it as an admin adjustment.
 func (s *Store) AdjustBalance(ctx context.Context, userID, amount int64, note string) (*User, error) {
@@ -225,12 +205,6 @@ func (s *Store) SessionUser(ctx context.Context, tokenHash string) (*User, error
 
 func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, tokenHash)
-	return err
-}
-
-// DeleteOtherSessions logs a user out everywhere except the given session.
-func (s *Store) DeleteOtherSessions(ctx context.Context, userID int64, keepHash string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ? AND token_hash != ?`, userID, keepHash)
 	return err
 }
 

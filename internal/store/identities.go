@@ -47,13 +47,13 @@ func insertIdentity(ctx context.Context, tx *sql.Tx, id Identity) error {
 
 var ErrIdentityTaken = errors.New("this account is already linked to another user")
 
-// CreateOAuthUser creates a password-less user together with its identity.
-// Like CreateUser, the very first user becomes an admin.
-func (s *Store) CreateOAuthUser(ctx context.Context, email, name string, signupCredit int64, id Identity) (*User, error) {
+// CreateOAuthUser creates a user together with its identity. An empty role
+// makes the very first user an admin.
+func (s *Store) CreateOAuthUser(ctx context.Context, email, name, role string, signupCredit int64, id Identity) (*User, error) {
 	var userID int64
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
 		var err error
-		userID, err = insertUser(ctx, tx, email, name, "", signupCredit)
+		userID, err = insertUser(ctx, tx, email, name, role, signupCredit)
 		if err != nil {
 			return err
 		}

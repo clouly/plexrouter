@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
 	"github.com/clouly/plexrouter/internal/config"
 	"github.com/clouly/plexrouter/internal/gateway"
 	"github.com/clouly/plexrouter/internal/secure"
@@ -54,8 +52,9 @@ func run() error {
 	}
 	defer st.Close()
 
-	if err := bootstrapAdmin(st, cfg); err != nil {
-		return err
+	if cfg.GoogleClientID == "" && cfg.GitHubClientID == "" {
+		log.Warn("no sign-in provider configured: set PLEXROUTER_GITHUB_CLIENT_ID/_SECRET or " +
+			"PLEXROUTER_GOOGLE_CLIENT_ID/_SECRET, otherwise nobody can log in to the console")
 	}
 
 	box, err := secure.NewBox(cfg.Secret)
@@ -93,27 +92,6 @@ func run() error {
 		defer cancel()
 		return httpServer.Shutdown(shutdownCtx)
 	}
-	return nil
-}
-
-// bootstrapAdmin creates the admin account from env vars on an empty database.
-func bootstrapAdmin(st *store.Store, cfg *config.Config) error {
-	if cfg.AdminEmail == "" || cfg.AdminPassword == "" {
-		return nil
-	}
-	ctx := context.Background()
-	n, err := st.CountUsers(ctx)
-	if err != nil || n > 0 {
-		return err
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(cfg.AdminPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-	if _, err := st.CreateUser(ctx, cfg.AdminEmail, "Admin", string(hash), 0); err != nil {
-		return fmt.Errorf("create admin: %w", err)
-	}
-	slog.Info("created admin account", "email", cfg.AdminEmail)
 	return nil
 }
 

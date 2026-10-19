@@ -9,8 +9,6 @@ export interface User {
   role: Role;
   balance: number; // USD
   disabled: boolean;
-  /** false for accounts created via Google/GitHub that never set a password. */
-  has_password: boolean;
   created_at: string;
 }
 

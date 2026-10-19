@@ -54,15 +54,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/models", s.handlePublicModels)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 
-	mux.HandleFunc("POST /api/auth/register", s.limited(s.handleRegister))
-	mux.HandleFunc("POST /api/auth/login", s.limited(s.handleLogin))
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/auth/oauth/{provider}", s.limited(s.handleOAuthStart))
 	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
 	mux.HandleFunc("GET /api/me/identities", s.user(s.handleListIdentities))
 	mux.HandleFunc("DELETE /api/me/identities/{provider}", s.user(s.handleUnlinkIdentity))
 	mux.HandleFunc("GET /api/me", s.user(s.handleMe))
-	mux.HandleFunc("POST /api/me/password", s.user(s.handleChangePassword))
 
 	mux.HandleFunc("GET /api/keys", s.user(s.handleListKeys))
 	mux.HandleFunc("POST /api/keys", s.user(s.handleCreateKey))

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/clouly/plexrouter/internal/oauth"
@@ -157,12 +159,32 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		oauthFail(w, r, false, code)
 		return
 	}
+	if u, err = s.ensureAdmin(r.Context(), u); err != nil {
+		s.log.Error("oauth promote admin", "err", err)
+		oauthFail(w, r, false, "provider_error")
+		return
+	}
 	if err := s.startSession(w, r, u); err != nil {
 		s.log.Error("oauth session", "err", err)
 		oauthFail(w, r, false, "provider_error")
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// isAdminEmail reports whether PLEXROUTER_ADMIN_EMAILS lists this address.
+func (s *Server) isAdminEmail(email string) bool {
+	return slices.Contains(s.cfg.AdminEmails, strings.ToLower(email))
+}
+
+// ensureAdmin promotes a user listed in PLEXROUTER_ADMIN_EMAILS, so an
+// operator can always (re)gain admin access by signing in.
+func (s *Server) ensureAdmin(ctx context.Context, u *store.User) (*store.User, error) {
+	if u.IsAdmin() || !s.isAdminEmail(u.Email) {
+		return u, nil
+	}
+	role := store.RoleAdmin
+	return s.store.UpdateUser(ctx, u.ID, store.UserUpdate{Role: &role})
 }
 
 // oauthSignIn finds or creates the account for a provider profile. It returns
@@ -202,18 +224,29 @@ func (s *Server) oauthSignIn(ctx context.Context, prof *oauth.Profile, id store.
 		return nil, "", err
 	}
 
-	n, err := s.store.CountUsers(ctx)
-	if err != nil {
-		return nil, "", err
+	// With an admin list, only listed emails become admins; without one, the
+	// first account does (and may always be created).
+	role := ""
+	if len(s.cfg.AdminEmails) > 0 {
+		role = store.RoleUser
+		if s.isAdminEmail(prof.Email) {
+			role = store.RoleAdmin
+		}
 	}
-	if !s.cfg.AllowRegister && n > 0 {
-		return nil, "registration_closed", nil
+	if !s.cfg.AllowRegister && role != store.RoleAdmin {
+		n, err := s.store.CountUsers(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		if n > 0 || role == store.RoleUser {
+			return nil, "registration_closed", nil
+		}
 	}
 	name := prof.Name
 	if name == "" {
 		name = prof.Email
 	}
-	u, err = s.store.CreateOAuthUser(ctx, prof.Email, name, store.FromUSD(s.cfg.SignupCredit), id)
+	u, err = s.store.CreateOAuthUser(ctx, prof.Email, name, role, store.FromUSD(s.cfg.SignupCredit), id)
 	if errors.Is(err, store.ErrIdentityTaken) || errors.Is(err, store.ErrEmailTaken) {
 		return nil, "already_linked", nil // lost a race with a concurrent sign-in
 	}
@@ -275,8 +308,8 @@ func (s *Server) handleUnlinkIdentity(w http.ResponseWriter, r *http.Request) {
 			others++
 		}
 	}
-	if !u.HasPassword() && others == 0 {
-		writeErr(w, http.StatusBadRequest, "last_login_method", "set a password or link another account before disconnecting this one")
+	if others == 0 {
+		writeErr(w, http.StatusBadRequest, "last_login_method", "link another account before disconnecting this one")
 		return
 	}
 	if err := s.store.UnlinkIdentity(r.Context(), u.ID, provider); err != nil {

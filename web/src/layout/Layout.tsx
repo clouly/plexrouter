@@ -88,11 +88,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             <Link to="/login" onClick={onNavigate} className="inline-flex h-9 items-center justify-center rounded-lg bg-accent text-sm font-medium text-accent-fg hover:bg-accent-hover">
               {t("auth.login")}
             </Link>
-            {config?.allow_register !== false && (
-              <Link to="/register" onClick={onNavigate} className="inline-flex h-9 items-center justify-center rounded-lg border border-line bg-surface text-sm font-medium hover:bg-subtle">
-                {t("auth.register")}
-              </Link>
-            )}
           </div>
         )}
       </nav>

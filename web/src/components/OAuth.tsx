@@ -34,8 +34,7 @@ export function OAuthButtons({ providers, disabled }: { providers: OAuthProvider
   const t = useT();
   if (providers.length === 0) return null;
   return (
-    <>
-      <div className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-2.5">
         {providers.map((p) => (
           <button
             key={p}
@@ -50,12 +49,6 @@ export function OAuthButtons({ providers, disabled }: { providers: OAuthProvider
             <span className="truncate px-6">{t("auth.continueWith", { provider: OAUTH_LABELS[p] })}</span>
           </button>
         ))}
-      </div>
-      <div className="my-5 flex items-center gap-3 text-xs text-muted">
-        <span className="h-px flex-1 bg-line" />
-        <span>{t("auth.or")}</span>
-        <span className="h-px flex-1 bg-line" />
-      </div>
-    </>
+    </div>
   );
 }

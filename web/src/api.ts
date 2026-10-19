@@ -88,12 +88,8 @@ export const api = {
   models: () => get<{ data: PublicModel[] }>("/api/models"),
 
   // Auth
-  register: (body: { email: string; password: string; name?: string }) => post<{ user: User }>("/api/auth/register", body),
-  login: (body: { email: string; password: string }) => post<{ user: User }>("/api/auth/login", body),
   logout: () => post<Ok>("/api/auth/logout"),
   me: () => get<{ user: User }>("/api/me"),
-  /** `old_password` may be omitted when the account has no password yet (sets the first one). */
-  changePassword: (body: { old_password?: string; new_password: string }) => post<Ok>("/api/me/password", body),
   identities: () => get<{ data: Identity[] }>("/api/me/identities"),
   unlinkIdentity: (provider: OAuthProvider) => del<Ok>(`/api/me/identities/${provider}`),
 

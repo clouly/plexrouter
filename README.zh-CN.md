@@ -12,20 +12,24 @@
 - **原生协议适配** —— 自动转换为 Anthropic Messages API 和 Gemini API（含工具调用与流式）；OpenAI 兼容上游直接透传，保留额外字段。
 - **路由与失败回退** —— 一个模型（如 `openai/gpt-4o`）可以由多个供应商提供，按优先级依次尝试；客户端也可以传 `models: [...]` 回退到其他模型。回退在向客户端发送第一个字节之前完成，对客户端透明。
 - **余额与计费** —— 每个模型按每百万输入/输出 token 定价，每次请求按上游返回的 token 数精确扣费（纳美元精度）。支持 Key 额度上限、兑换码、管理员调账、注册赠送。
-- **Google / GitHub 登录** —— 可选的 OAuth 登录，按已验证邮箱自动关联已有账号。
+- **Google / GitHub 登录** —— 无需管理密码；首次登录自动建号，按已验证邮箱关联已有账号。
 - **Web 控制台** —— 用户可管理 API Key、查看用量、日志和消费图表、浏览模型列表和文档；管理员可管理供应商（支持连通性测试和一键导入模型）、模型与路由、用户、请求日志和兑换码。支持 10 种语言（English、简体中文、繁體中文、日本語、한국어、Español、Français、Deutsch、Português、Русский）及浅色/深色主题。
 - **部署简单** —— 单个静态二进制，内置 SQLite（纯 Go，无需 CGO），零必填配置。提供 Docker 镜像和 docker-compose。
-- **默认安全** —— 供应商 API Key 加密存储（AES-256-GCM），用户 API Key 只存哈希，bcrypt 密码，HttpOnly 会话 Cookie，CSRF 防护，登录限流。
+- **默认安全** —— 供应商 API Key 加密存储（AES-256-GCM），用户 API Key 只存哈希，不存密码（通过 Google/GitHub 登录，带 PKCE），HttpOnly 会话 Cookie，CSRF 防护，请求限流。
 
 ## 快速开始
+
+用户通过 **GitHub 或 Google** 登录（不设密码），所以先创建一个 OAuth 应用。GitHub 最快：打开 [Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers)，Homepage 填 `http://localhost:8080`，回调地址填 `http://localhost:8080/api/auth/oauth/github/callback`，复制 Client ID 并生成 Client Secret。
 
 ### Docker
 
 ```bash
-docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data ghcr.io/clouly/plexrouter:latest
+docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data \
+  -e PLEXROUTER_GITHUB_CLIENT_ID=<client-id> -e PLEXROUTER_GITHUB_CLIENT_SECRET=<client-secret> \
+  ghcr.io/clouly/plexrouter:latest
 ```
 
-或使用 compose：
+或使用 compose（把这两个变量写进 `.env`）：
 
 ```bash
 docker compose up -d
@@ -52,7 +56,7 @@ make build        # 构建控制台到 web/dist，构建服务端到 bin/
 
 然后打开 <http://localhost:8080>：
 
-1. **注册** —— 第一个注册的账号自动成为管理员。
+1. **用 GitHub 登录** —— 第一个登录的账号自动成为管理员（也可以用 `PLEXROUTER_ADMIN_EMAILS` 指定管理员）。
 2. **管理 → 供应商** —— 添加供应商（例如类型选 `openai` 填 OpenAI Key，或选 `openai_compatible` 填 `https://api.deepseek.com/v1`）。点 **测试**，再点 **导入模型**。
 3. **管理 → 模型管理** —— 导入的模型默认 *禁用且价格为 0*，设置价格（美元 / 百万 token）后启用。一个模型可以配置多个供应商实现回退。
 4. **管理 → 用户** —— 给自己加点余额（或生成兑换码）。
@@ -70,8 +74,9 @@ cp .env.example .env
 编辑 `.env`：
 
 - `PLEXROUTER_SECRET` —— 填 `openssl rand -hex 32` 的输出并妥善保存。它用来加密供应商 API Key，丢失或修改后已保存的 Key 将无法解密。
-- `PLEXROUTER_ADMIN_EMAIL` / `PLEXROUTER_ADMIN_PASSWORD` —— 首次启动时创建管理员。
-- `PLEXROUTER_ALLOW_REGISTER=false` —— 不想开放注册时设置。
+- `PLEXROUTER_GITHUB_CLIENT_ID` / `_SECRET` 和/或 `PLEXROUTER_GOOGLE_CLIENT_ID` / `_SECRET`，以及 `PLEXROUTER_PUBLIC_URL`（如 `https://api.example.com`）—— 登录配置，见 [Google / GitHub 登录](#google--github-登录)。
+- `PLEXROUTER_ADMIN_EMAILS` —— 填你自己的邮箱，这样无论谁先登录，你都是管理员。
+- `PLEXROUTER_ALLOW_REGISTER=false` —— 只允许已有账号（和指定的管理员）登录时设置。
 - `HTTPS_PROXY` —— 服务器无法直连模型接口时（例如国内服务器访问 OpenAI / Anthropic / Google）设置出站代理；或者只接入国内模型（DeepSeek、通义千问、豆包等，类型选 `openai_compatible`）。
 
 ```bash
@@ -150,9 +155,9 @@ print(resp.choices[0].message.content)
 | `PLEXROUTER_DB` | `$DATA_DIR/plexrouter.db` | 数据库文件 |
 | `PLEXROUTER_SECRET` | 自动生成 | 用于加密供应商 Key。未设置时生成到 `$DATA_DIR/secret.key`，请妥善备份 |
 | `PLEXROUTER_NAME` | `PlexRouter` | 控制台显示的名称 |
-| `PLEXROUTER_ALLOW_REGISTER` | `true` | 是否开放注册 |
+| `PLEXROUTER_ALLOW_REGISTER` | `true` | 是否为首次登录的 Google/GitHub 用户新建账号 |
 | `PLEXROUTER_SIGNUP_CREDIT` | `0` | 新用户赠送的美元余额 |
-| `PLEXROUTER_ADMIN_EMAIL` / `PLEXROUTER_ADMIN_PASSWORD` | | 首次启动时创建的管理员 |
+| `PLEXROUTER_ADMIN_EMAILS` | | 管理员邮箱，逗号分隔（关闭注册时也能登录）。不设置时第一个登录的用户是管理员 |
 | `PLEXROUTER_REQUEST_TIMEOUT` | `10m` | 单次上游请求的最长时间 |
 | `PLEXROUTER_TRUST_PROXY` | `false` | 在反向代理后时，用 `X-Forwarded-For` 取客户端 IP |
 | `PLEXROUTER_PUBLIC_URL` | 从请求推断 | 对外访问的地址，用于 OAuth 回调 |
@@ -162,12 +167,12 @@ print(resp.choices[0].message.content)
 
 ### Google / GitHub 登录
 
-可选。配置好对应的 Client ID 和 Secret 后，登录页就会出现相应的按钮。回调地址是 `<PLEXROUTER_PUBLIC_URL>/api/auth/oauth/<provider>/callback`，`PLEXROUTER_PUBLIC_URL` 填用户实际访问的地址，例如 `https://api.example.com`。不设置时从请求中推断。
+登录只支持 Google 和/或 GitHub，至少要配置一个，否则没人能登录控制台。配置好对应的 Client ID 和 Secret 后，登录页就会出现相应的按钮。回调地址是 `<PLEXROUTER_PUBLIC_URL>/api/auth/oauth/<provider>/callback`，`PLEXROUTER_PUBLIC_URL` 填用户实际访问的地址，例如 `https://api.example.com`。不设置时从请求中推断。
 
 - **Google**：打开 [Google Cloud Console → 凭据](https://console.cloud.google.com/apis/credentials)，选择「创建凭据 → OAuth 客户端 ID → Web 应用」，在已获授权的重定向 URI 中添加 `https://api.example.com/api/auth/oauth/google/callback`，然后填写 `PLEXROUTER_GOOGLE_CLIENT_ID` / `PLEXROUTER_GOOGLE_CLIENT_SECRET`。
 - **GitHub**：打开 [Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers)，Authorization callback URL 填 `https://api.example.com/api/auth/oauth/github/callback`，然后填写 `PLEXROUTER_GITHUB_CLIENT_ID` / `PLEXROUTER_GITHUB_CLIENT_SECRET`。
 
-Google / GitHub 账号的已验证邮箱与现有 PlexRouter 账号相同时，会自动关联到该账号；否则新建账号（关闭注册时不会新建）。用户可以在「设置」里绑定或解绑第三方账号，也可以设置密码。
+Google / GitHub 账号的已验证邮箱与现有 PlexRouter 账号相同时，会自动关联到该账号；否则新建账号（关闭注册时不会新建）。用户可以在「设置」里绑定或解绑第三方账号，但至少要保留一个。
 
 ## 计费规则
 

@@ -5,7 +5,7 @@ import { useT } from "./i18n";
 import { Layout } from "./layout/Layout";
 import { Spinner } from "./components/Spinner";
 import { EmptyState } from "./components/EmptyState";
-import { LoginPage, RegisterPage } from "./pages/Auth";
+import { LoginPage } from "./pages/Auth";
 import { DashboardPage } from "./pages/Dashboard";
 import { KeysPage } from "./pages/Keys";
 import { ModelsPage } from "./pages/Models";
@@ -64,7 +64,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
-      <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
+      <Route path="/register" element={<Navigate to="/login" replace />} />
       <Route element={<Layout />}>
         <Route index element={auth(<DashboardPage />)} />
         <Route path="keys" element={auth(<KeysPage />)} />

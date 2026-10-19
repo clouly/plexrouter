@@ -21,8 +21,7 @@ type Config struct {
 	Name           string        // brand name shown in the console
 	AllowRegister  bool          // whether anyone can sign up
 	SignupCredit   float64       // USD granted to new accounts
-	AdminEmail     string        // bootstrap admin (created on first start if no users exist)
-	AdminPassword  string        //
+	AdminEmails    []string      // lowercased; these accounts are admins. Empty = first user is admin
 	RequestTimeout time.Duration // upper bound for a single upstream request
 	TrustProxy     bool          // trust X-Forwarded-For / X-Real-IP (behind a reverse proxy)
 	LogLevel       slog.Level
@@ -43,8 +42,7 @@ func Load() (*Config, error) {
 		Name:           env("PLEXROUTER_NAME", "PlexRouter"),
 		AllowRegister:  envBool("PLEXROUTER_ALLOW_REGISTER", true),
 		SignupCredit:   envFloat("PLEXROUTER_SIGNUP_CREDIT", 0),
-		AdminEmail:     os.Getenv("PLEXROUTER_ADMIN_EMAIL"),
-		AdminPassword:  os.Getenv("PLEXROUTER_ADMIN_PASSWORD"),
+		AdminEmails:    envList("PLEXROUTER_ADMIN_EMAILS"),
 		RequestTimeout: envDuration("PLEXROUTER_REQUEST_TIMEOUT", 10*time.Minute),
 		TrustProxy:     envBool("PLEXROUTER_TRUST_PROXY", false),
 
@@ -99,6 +97,17 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envList splits a comma-separated variable into lowercased, trimmed items.
+func envList(key string) []string {
+	var out []string
+	for _, v := range strings.Split(os.Getenv(key), ",") {
+		if v = strings.ToLower(strings.TrimSpace(v)); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func envBool(key string, def bool) bool {
