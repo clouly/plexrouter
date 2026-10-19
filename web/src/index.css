@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+/* Dark mode is class-based so the user can override the system preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --c-page: #fafafa;
+  --c-surface: #ffffff;
+  --c-subtle: #f4f4f5;
+  --c-line: #e4e4e7;
+  --c-line-strong: #d4d4d8;
+  --c-fg: #18181b;
+  --c-muted: #71717a;
+  --c-accent: #4f46e5;
+  --c-accent-hover: #4338ca;
+  --c-accent-soft: #eef2ff;
+  --c-accent-fg: #ffffff;
+  --c-code: #f4f4f5;
+  color-scheme: light;
+}
+
+.dark {
+  --c-page: #09090b;
+  --c-surface: #111113;
+  --c-subtle: #1a1a1d;
+  --c-line: #27272a;
+  --c-line-strong: #3f3f46;
+  --c-fg: #f4f4f5;
+  --c-muted: #a1a1aa;
+  --c-accent: #6366f1;
+  --c-accent-hover: #818cf8;
+  --c-accent-soft: rgba(99, 102, 241, 0.14);
+  --c-accent-fg: #ffffff;
+  --c-code: #0c0c0e;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-page: var(--c-page);
+  --color-surface: var(--c-surface);
+  --color-subtle: var(--c-subtle);
+  --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
+  --color-fg: var(--c-fg);
+  --color-muted: var(--c-muted);
+  --color-accent: var(--c-accent);
+  --color-accent-hover: var(--c-accent-hover);
+  --color-accent-soft: var(--c-accent-soft);
+  --color-accent-fg: var(--c-accent-fg);
+  --color-code: var(--c-code);
+}
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--c-page);
+    color: var(--c-fg);
+  }
+  body {
+    @apply font-sans text-sm antialiased;
+  }
+  *,
+  ::before,
+  ::after {
+    border-color: var(--c-line);
+  }
+  :focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+  }
+  input[type="number"]::-webkit-inner-spin-button {
+    opacity: 0.5;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@utility animate-toast {
+  animation: toast-in 160ms ease-out;
+}
+@utility animate-fade {
+  animation: fade-in 120ms ease-out;
+}
+@utility animate-pop {
+  animation: pop-in 140ms ease-out;
+}

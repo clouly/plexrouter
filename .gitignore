@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/dist/
+web/dist/*
+!web/dist/.gitkeep
+
+# Runtime data (SQLite database, generated secret)
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Dependencies
+node_modules/
+
+# Local env / editor
+.env
+.DS_Store
+.idea/
+.vscode/
+*.log
