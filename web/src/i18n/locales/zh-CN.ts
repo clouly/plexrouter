@@ -1,7 +1,8 @@
 import type { MessageKey } from "./en";
 
 // Simplified Chinese. Must define every key in en.ts (enforced by the type).
-export const zhCN: Record<MessageKey, string> = {
+// Chinese has no plural forms, so plain {n} placeholders are used instead of {n, plural, ...}.
+const zhCN: Record<MessageKey, string> = {
   // Navigation / shell
   "nav.dashboard": "概览",
   "nav.keys": "API 密钥",
@@ -89,6 +90,9 @@ export const zhCN: Record<MessageKey, string> = {
   "auth.createAccount": "创建账号",
   "auth.noAccount": "还没有账号？",
   "auth.haveAccount": "已有账号？",
+  "auth.or": "或",
+  "auth.continueWith": "使用 {provider} 继续",
+  "auth.oauthFailed": "登录失败（{code}），请重试。",
 
   // Dashboard
   "dashboard.title": "概览",
@@ -255,6 +259,20 @@ export const zhCN: Record<MessageKey, string> = {
   "settings.updatePassword": "更新密码",
   "settings.passwordChanged": "密码已更新",
   "settings.preferences": "偏好设置",
+  "settings.setPassword": "设置密码",
+  "settings.setPasswordDesc": "你目前通过 Google 或 GitHub 登录。设置密码后也可以使用邮箱登录。至少 8 个字符。",
+  "settings.setPasswordButton": "设置密码",
+  "settings.passwordSet": "密码已设置",
+  "settings.connectedAccounts": "已关联账号",
+  "settings.connectedAccountsDesc": "使用第三方账号登录，无需密码。",
+  "settings.connect": "关联",
+  "settings.disconnect": "解除关联",
+  "settings.notConnected": "未关联",
+  "settings.connectedOn": "关联于 {date}",
+  "settings.disconnectTitle": "解除关联 {provider}？",
+  "settings.disconnectMessage": "之后将无法再使用 {provider} 账号 {email} 登录。",
+  "settings.disconnected": "已解除关联 {provider}",
+  "settings.linked": "已关联 {provider} 账号",
 
   // Admin: overview
   "adminOverview.title": "总览",
@@ -449,4 +467,32 @@ export const zhCN: Record<MessageKey, string> = {
   "redeem.deleteTitle": "删除兑换码？",
   "redeem.deleteMessage": "{code}（{amount}）将无法再被兑换。",
   "redeem.deleted": "兑换码已删除",
+
+  // API error codes (ApiError.code → errors.<code>)
+  "errors.unauthorized": "请先登录。",
+  "errors.forbidden": "你没有执行此操作的权限。",
+  "errors.not_found": "请求的内容不存在。",
+  "errors.internal_error": "服务器出错了，请重试。",
+  "errors.rate_limited": "请求过于频繁，请稍后再试。",
+  "errors.invalid_credentials": "邮箱或密码错误。",
+  "errors.wrong_password": "当前密码不正确。",
+  "errors.invalid_email": "请输入有效的邮箱地址。",
+  "errors.weak_password": "密码强度不足，至少需要 8 个字符。",
+  "errors.email_taken": "该邮箱已被注册。",
+  "errors.registration_closed": "注册已关闭，暂时无法创建新账号。",
+  "errors.account_disabled": "该账号已被禁用。",
+  "errors.invalid_code": "兑换码无效或已被使用。",
+  "errors.slug_taken": "已存在使用该标识（slug）的模型。",
+  "errors.last_login_method": "无法移除唯一的登录方式。请先设置密码或关联其他账号。",
+  "errors.cross_origin": "请求并非来自本站，已被拦截。请刷新页面后重试。",
+  "errors.not_configured": "服务器未配置此登录方式。",
+  "errors.state_mismatch": "登录请求已过期，请重试。",
+  "errors.provider_error": "登录服务拒绝了请求或无法访问，请重试。",
+  "errors.access_denied": "已取消登录。",
+  "errors.email_unverified": "该账号没有已验证的邮箱地址。",
+  "errors.already_linked": "该账号已关联到其他用户。",
+  "errors.not_logged_in": "请先登录，再关联账号。",
+  "errors.network_error": "无法连接服务器，请检查网络后重试。",
 };
+
+export default zhCN;

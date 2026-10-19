@@ -8,6 +8,7 @@ import { formatUSD } from "../lib/format";
 import { Icon, type IconName } from "../components/Icon";
 import { IconButton } from "../components/Button";
 import { useToast } from "../components/Toast";
+import { LanguageMenu } from "../components/LanguageMenu";
 
 interface NavItem {
   to: string;
@@ -100,22 +101,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         {config?.version && <span> · v{config.version.replace(/^v/, "")}</span>}
       </div>
     </div>
-  );
-}
-
-export function LangToggle() {
-  const { lang, setLang, t } = useI18n();
-  return (
-    <button
-      type="button"
-      onClick={() => setLang(lang === "en" ? "zh-CN" : "en")}
-      title={t("header.language")}
-      aria-label={t("header.language")}
-      className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted hover:bg-subtle hover:text-fg"
-    >
-      <Icon name="globe" />
-      {lang === "en" ? "中文" : "EN"}
-    </button>
   );
 }
 
@@ -250,7 +235,7 @@ export function Layout() {
             <Logo name={name} />
           </div>
           <div className="flex-1" />
-          <LangToggle />
+          <LanguageMenu />
           <ThemeToggle />
           <UserMenu />
         </header>

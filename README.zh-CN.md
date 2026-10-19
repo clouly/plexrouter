@@ -12,7 +12,8 @@
 - **原生协议适配** —— 自动转换为 Anthropic Messages API 和 Gemini API（含工具调用与流式）；OpenAI 兼容上游直接透传，保留额外字段。
 - **路由与失败回退** —— 一个模型（如 `openai/gpt-4o`）可以由多个供应商提供，按优先级依次尝试；客户端也可以传 `models: [...]` 回退到其他模型。回退在向客户端发送第一个字节之前完成，对客户端透明。
 - **余额与计费** —— 每个模型按每百万输入/输出 token 定价，每次请求按上游返回的 token 数精确扣费（纳美元精度）。支持 Key 额度上限、兑换码、管理员调账、注册赠送。
-- **Web 控制台** —— 用户可管理 API Key、查看用量、日志和消费图表、浏览模型列表和文档；管理员可管理供应商（支持连通性测试和一键导入模型）、模型与路由、用户、请求日志和兑换码。支持中英文、浅色/深色主题。
+- **Google / GitHub 登录** —— 可选的 OAuth 登录，按已验证邮箱自动关联已有账号。
+- **Web 控制台** —— 用户可管理 API Key、查看用量、日志和消费图表、浏览模型列表和文档；管理员可管理供应商（支持连通性测试和一键导入模型）、模型与路由、用户、请求日志和兑换码。支持 10 种语言（English、简体中文、繁體中文、日本語、한국어、Español、Français、Deutsch、Português、Русский）及浅色/深色主题。
 - **部署简单** —— 单个静态二进制，内置 SQLite（纯 Go，无需 CGO），零必填配置。提供 Docker 镜像和 docker-compose。
 - **默认安全** —— 供应商 API Key 加密存储（AES-256-GCM），用户 API Key 只存哈希，bcrypt 密码，HttpOnly 会话 Cookie，CSRF 防护，登录限流。
 
@@ -154,7 +155,19 @@ print(resp.choices[0].message.content)
 | `PLEXROUTER_ADMIN_EMAIL` / `PLEXROUTER_ADMIN_PASSWORD` | | 首次启动时创建的管理员 |
 | `PLEXROUTER_REQUEST_TIMEOUT` | `10m` | 单次上游请求的最长时间 |
 | `PLEXROUTER_TRUST_PROXY` | `false` | 在反向代理后时，用 `X-Forwarded-For` 取客户端 IP |
+| `PLEXROUTER_PUBLIC_URL` | 从请求推断 | 对外访问的地址，用于 OAuth 回调 |
+| `PLEXROUTER_GOOGLE_CLIENT_ID` / `_SECRET` | | 启用 Google 登录 |
+| `PLEXROUTER_GITHUB_CLIENT_ID` / `_SECRET` | | 启用 GitHub 登录 |
 | `PLEXROUTER_LOG_LEVEL` | `info` | `debug`、`info`、`warn`、`error` |
+
+### Google / GitHub 登录
+
+可选。配置好对应的 Client ID 和 Secret 后，登录页就会出现相应的按钮。回调地址是 `<PLEXROUTER_PUBLIC_URL>/api/auth/oauth/<provider>/callback`，`PLEXROUTER_PUBLIC_URL` 填用户实际访问的地址，例如 `https://api.example.com`。不设置时从请求中推断。
+
+- **Google**：打开 [Google Cloud Console → 凭据](https://console.cloud.google.com/apis/credentials)，选择「创建凭据 → OAuth 客户端 ID → Web 应用」，在已获授权的重定向 URI 中添加 `https://api.example.com/api/auth/oauth/google/callback`，然后填写 `PLEXROUTER_GOOGLE_CLIENT_ID` / `PLEXROUTER_GOOGLE_CLIENT_SECRET`。
+- **GitHub**：打开 [Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers)，Authorization callback URL 填 `https://api.example.com/api/auth/oauth/github/callback`，然后填写 `PLEXROUTER_GITHUB_CLIENT_ID` / `PLEXROUTER_GITHUB_CLIENT_SECRET`。
+
+Google / GitHub 账号的已验证邮箱与现有 PlexRouter 账号相同时，会自动关联到该账号；否则新建账号（关闭注册时不会新建）。用户可以在「设置」里绑定或解绑第三方账号，也可以设置密码。
 
 ## 计费规则
 

@@ -33,16 +33,26 @@ func sessionHash(r *http.Request) string {
 	return secure.HashToken(c.Value)
 }
 
+var errNoSession = errors.New("not logged in")
+
+// sessionUser returns the enabled user behind the request's session cookie.
+func (s *Server) sessionUser(r *http.Request) (*store.User, error) {
+	hash := sessionHash(r)
+	if hash == "" {
+		return nil, errNoSession
+	}
+	u, err := s.store.SessionUser(r.Context(), hash)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && u.Disabled) {
+		return nil, errNoSession
+	}
+	return u, err
+}
+
 // user requires a logged-in, enabled account.
 func (s *Server) user(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		hash := sessionHash(r)
-		if hash == "" {
-			writeErr(w, http.StatusUnauthorized, "unauthorized", "not logged in")
-			return
-		}
-		u, err := s.store.SessionUser(r.Context(), hash)
-		if errors.Is(err, store.ErrNotFound) || (err == nil && u.Disabled) {
+		u, err := s.sessionUser(r)
+		if errors.Is(err, errNoSession) {
 			writeErr(w, http.StatusUnauthorized, "unauthorized", "not logged in")
 			return
 		}
@@ -81,7 +91,8 @@ func isHTTPS(r *http.Request) bool {
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	ok(w, map[string]any{"name": s.cfg.Name, "version": s.version, "allow_register": s.cfg.AllowRegister})
+	ok(w, map[string]any{"name": s.cfg.Name, "version": s.version, "allow_register": s.cfg.AllowRegister,
+		"oauth_providers": s.oauthProviderNames()})
 }
 
 type credentials struct {
@@ -148,7 +159,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	if u == nil {
+	if u == nil || !u.HasPassword() {
 		bcrypt.CompareHashAndPassword(dummyHash, []byte(in.Password))
 		writeErr(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 		return
@@ -190,8 +201,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Old)) != nil {
-		writeErr(w, http.StatusBadRequest, "invalid_credentials", "current password is incorrect")
+	// OAuth-only accounts set their first password without an old one.
+	if u.HasPassword() && bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Old)) != nil {
+		writeErr(w, http.StatusBadRequest, "wrong_password", "current password is incorrect")
 		return
 	}
 	if len(in.New) < minPassword {

@@ -1,9 +1,12 @@
+import { translateErrorCode } from "./i18n";
 import type {
   AdminModel,
   AdminStats,
   AdminUser,
   ApiKey,
   AppConfig,
+  Identity,
+  OAuthProvider,
   ModelInput,
   Paginated,
   Provider,
@@ -89,7 +92,10 @@ export const api = {
   login: (body: { email: string; password: string }) => post<{ user: User }>("/api/auth/login", body),
   logout: () => post<Ok>("/api/auth/logout"),
   me: () => get<{ user: User }>("/api/me"),
-  changePassword: (body: { old_password: string; new_password: string }) => post<Ok>("/api/me/password", body),
+  /** `old_password` may be omitted when the account has no password yet (sets the first one). */
+  changePassword: (body: { old_password?: string; new_password: string }) => post<Ok>("/api/me/password", body),
+  identities: () => get<{ data: Identity[] }>("/api/me/identities"),
+  unlinkIdentity: (provider: OAuthProvider) => del<Ok>(`/api/me/identities/${provider}`),
 
   // Keys
   keys: () => get<{ data: ApiKey[] }>("/api/keys"),
@@ -129,7 +135,17 @@ export const api = {
   },
 };
 
+/**
+ * User-facing text for an error: the localized `errors.<code>` message when one exists for an
+ * ApiError's code, otherwise the server's message.
+ */
 export function errorMessage(e: unknown): string {
+  if (e instanceof ApiError) return translateErrorCode(e.code) ?? e.message;
   if (e instanceof Error) return e.message;
   return String(e);
+}
+
+/** Browser navigation (not fetch) that starts a Google/GitHub sign-in or account link. */
+export function startOAuth(provider: OAuthProvider, mode: "login" | "link") {
+  window.location.href = `/api/auth/oauth/${encodeURIComponent(provider)}?mode=${mode}`;
 }

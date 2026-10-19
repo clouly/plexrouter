@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import type { AppConfig, User } from "./types";
+import { OAUTH_PROVIDERS, type AppConfig, type User } from "./types";
 
 interface AuthValue {
   /** undefined while the initial /api/me is in flight, null when logged out. */
@@ -13,7 +13,7 @@ interface AuthValue {
 
 const AuthContext = createContext<AuthValue | null>(null);
 
-const fallbackConfig: AppConfig = { name: "PlexRouter", version: "", allow_register: true };
+const fallbackConfig: AppConfig = { name: "PlexRouter", version: "", allow_register: true, oauth_providers: [] };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -33,13 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refreshUser();
     api
       .config()
-      .then(setConfig)
+      // Older servers may not send oauth_providers; keep only the providers we know how to show.
+      .then((c) => setConfig({ ...c, oauth_providers: (c.oauth_providers ?? []).filter((p) => OAUTH_PROVIDERS.includes(p)) }))
       .catch(() => setConfig(fallbackConfig));
   }, [refreshUser]);
 
-  useEffect(() => {
-    if (config?.name) document.title = config.name;
-  }, [config?.name]);
+  // Document titles ("<page> · <app name>") are set per page by useDocumentTitle, which re-runs when
+  // the config name or the language changes.
 
   const logout = useCallback(async () => {
     try {

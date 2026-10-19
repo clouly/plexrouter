@@ -26,6 +26,14 @@ type Config struct {
 	RequestTimeout time.Duration // upper bound for a single upstream request
 	TrustProxy     bool          // trust X-Forwarded-For / X-Real-IP (behind a reverse proxy)
 	LogLevel       slog.Level
+
+	// PublicURL is the externally visible base URL (https://api.example.com),
+	// used to build OAuth callback URLs. Derived from the request if empty.
+	PublicURL          string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GitHubClientID     string
+	GitHubClientSecret string
 }
 
 func Load() (*Config, error) {
@@ -39,6 +47,12 @@ func Load() (*Config, error) {
 		AdminPassword:  os.Getenv("PLEXROUTER_ADMIN_PASSWORD"),
 		RequestTimeout: envDuration("PLEXROUTER_REQUEST_TIMEOUT", 10*time.Minute),
 		TrustProxy:     envBool("PLEXROUTER_TRUST_PROXY", false),
+
+		PublicURL:          strings.TrimRight(os.Getenv("PLEXROUTER_PUBLIC_URL"), "/"),
+		GoogleClientID:     os.Getenv("PLEXROUTER_GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("PLEXROUTER_GOOGLE_CLIENT_SECRET"),
+		GitHubClientID:     os.Getenv("PLEXROUTER_GITHUB_CLIENT_ID"),
+		GitHubClientSecret: os.Getenv("PLEXROUTER_GITHUB_CLIENT_SECRET"),
 	}
 	if err := c.LogLevel.UnmarshalText([]byte(env("PLEXROUTER_LOG_LEVEL", "info"))); err != nil {
 		return nil, fmt.Errorf("PLEXROUTER_LOG_LEVEL: %w", err)

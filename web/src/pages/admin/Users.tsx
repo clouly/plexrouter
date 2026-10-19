@@ -80,7 +80,7 @@ export function AdminUsersPage() {
       <PageHeader title={t("users.title")} description={t("users.desc")} />
       <Card
         flush
-        title={t("users.count", { n: formatInt(total) })}
+        title={t("users.count", { n: total })}
         actions={
           <>
             <SearchInput

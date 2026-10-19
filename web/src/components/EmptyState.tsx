@@ -1,3 +1,4 @@
+import { errorMessage } from "../api";
 import type { ReactNode } from "react";
 import { useT } from "../i18n";
 import { Button } from "./Button";
@@ -32,7 +33,7 @@ export function ErrorState({ error, onRetry }: { error: Error; onRetry?: () => v
     <EmptyState
       icon="alert"
       title={t("common.errorTitle")}
-      description={<span className="text-red-600 dark:text-red-400">{error.message}</span>}
+      description={<span className="text-red-600 dark:text-red-400">{errorMessage(error)}</span>}
       action={
         onRetry && (
           <Button size="sm" icon="refresh" onClick={onRetry}>

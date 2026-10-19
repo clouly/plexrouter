@@ -5,8 +5,34 @@ export function setFormatLocale(locale: string) {
   currentLocale = locale;
 }
 
+const nfCache = new Map<string, Intl.NumberFormat>();
+function nf(opts: Intl.NumberFormatOptions): Intl.NumberFormat {
+  const key = currentLocale + JSON.stringify(opts);
+  let f = nfCache.get(key);
+  if (!f) {
+    try {
+      f = new Intl.NumberFormat(currentLocale, opts);
+    } catch {
+      f = new Intl.NumberFormat("en-US", opts);
+    }
+    nfCache.set(key, f);
+  }
+  return f;
+}
+
+function usd(n: number, maxDigits: number, sign: boolean): string {
+  return nf({
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol", // "$" everywhere, not "US$"
+    minimumFractionDigits: 2,
+    maximumFractionDigits: maxDigits,
+    signDisplay: sign ? "exceptZero" : "auto",
+  }).format(n);
+}
+
 /**
- * USD with adaptive precision:
+ * USD with adaptive precision, formatted for the active locale:
  *  - |n| >= 1   → 2 decimals ($1,234.50)
  *  - |n| < 1    → enough decimals for ~3 significant digits, max 8 ($0.000123)
  *  - 0          → $0.00
@@ -18,12 +44,10 @@ export function formatUSD(n: number | null | undefined, opts: { sign?: boolean }
   if (abs > 0 && abs < 1) {
     maxDigits = Math.min(8, Math.max(2, -Math.floor(Math.log10(abs)) + 2));
   }
-  const body = abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: maxDigits });
-  if (abs > 0 && Number(body.replace(/,/g, "")) === 0) {
-    return `${n < 0 ? "-" : ""}<$0.00000001`;
+  if (abs > 0 && Number(abs.toFixed(maxDigits)) === 0) {
+    return `${n < 0 ? "-" : ""}<${usd(0.00000001, 8, false)}`;
   }
-  const sign = n < 0 ? "-" : opts.sign && n > 0 ? "+" : "";
-  return `${sign}$${body}`;
+  return usd(n === 0 ? 0 : n, maxDigits, !!opts.sign); // normalize -0
 }
 
 /** Price per 1M tokens. */
@@ -31,17 +55,22 @@ export function formatPrice(n: number): string {
   return formatUSD(n);
 }
 
-/** 1234567 → "1,234,567" */
+/** 1234567 → "1,234,567" (locale grouping) */
 export function formatInt(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
-  return Math.round(n).toLocaleString("en-US");
+  return nf({ maximumFractionDigits: 0 }).format(Math.round(n));
+}
+
+/** Locale decimal with up to `digits` fraction digits and no grouping (for compact units). */
+function dec(n: number, digits: number, minDigits = 0): string {
+  return nf({ minimumFractionDigits: minDigits, maximumFractionDigits: digits, useGrouping: false }).format(n);
 }
 
 /** Compact token counts: 950 → "950", 12_300 → "12.3k", 4_500_000 → "4.5M". */
 export function formatTokens(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   const abs = Math.abs(n);
-  const fmt = (v: number, suffix: string) => `${v.toFixed(v >= 100 ? 0 : 1).replace(/\.0$/, "")}${suffix}`;
+  const fmt = (v: number, suffix: string) => `${dec(Number(v.toFixed(v >= 100 ? 0 : 1)), 1)}${suffix}`;
   if (abs >= 1e9) return fmt(n / 1e9, "B");
   if (abs >= 1e6) return fmt(n / 1e6, "M");
   if (abs >= 1e4) return fmt(n / 1e3, "k");
@@ -51,15 +80,15 @@ export function formatTokens(n: number | null | undefined): string {
 /** Context window: 128000 → "128K", 1048576 → "1M". */
 export function formatContext(n: number): string {
   if (!n) return "—";
-  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1000) return `${+(n / 1000).toFixed(1)}K`;
+  if (n >= 1_000_000) return `${dec(n / 1_000_000, 2)}M`;
+  if (n >= 1000) return `${dec(n / 1000, 1)}K`;
   return String(n);
 }
 
 export function formatLatency(ms: number): string {
   if (!Number.isFinite(ms)) return "—";
-  if (ms >= 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms >= 10_000) return `${dec(ms / 1000, 1, 1)}s`;
+  if (ms >= 1000) return `${dec(ms / 1000, 2, 2)}s`;
   return `${Math.round(ms)}ms`;
 }
 

@@ -22,6 +22,7 @@ type User = {
   role: "admin" | "user";
   balance: number;           // USD
   disabled: boolean;
+  has_password: boolean;     // false for accounts created via Google/GitHub that never set one
   created_at: string;
 };
 
@@ -100,7 +101,7 @@ type DailyStat = { date: string /* YYYY-MM-DD */; requests: number; tokens: numb
 
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/config` | | `{ name: string, version: string, allow_register: boolean }` |
+| GET | `/api/config` | | `{ name: string, version: string, allow_register: boolean, oauth_providers: ("google" \| "github")[] }` — `oauth_providers` lists only the ones configured on the server |
 | GET | `/api/models` | | `{ data: PublicModel[] }` (enabled models only) |
 
 ## Auth
@@ -111,7 +112,23 @@ type DailyStat = { date: string /* YYYY-MM-DD */; requests: number; tokens: numb
 | POST | `/api/auth/login` | `{ email, password }` | `{ user: User }` (+ sets cookie) |
 | POST | `/api/auth/logout` | | `{ ok: true }` |
 | GET | `/api/me` | | `{ user: User }` or 401 |
-| POST | `/api/me/password` | `{ old_password, new_password }` | `{ ok: true }` |
+| POST | `/api/me/password` | `{ old_password, new_password }` | `{ ok: true }`. When `has_password` is false, `old_password` is not required (this *sets* a first password). |
+| GET | `/api/me/identities` | | `{ data: { provider: "google" \| "github", email: string, created_at: string }[] }` — linked third-party accounts |
+| DELETE | `/api/me/identities/{provider}` | | `{ ok: true }`; `400 last_login_method` if the account has no password and no other linked identity |
+
+### Google / GitHub sign-in (OAuth)
+
+These are **browser navigations, not fetch calls** — set `window.location.href`:
+
+- `GET /api/auth/oauth/{provider}?mode=login` — sign in or sign up (provider = `google` | `github`). On success the server sets the session cookie and redirects to `/`. A brand-new account is created when no linked identity or verified matching email exists (subject to registration being open; the very first account ever becomes admin). An existing account with the same **verified** email is linked automatically.
+- `GET /api/auth/oauth/{provider}?mode=link` — while logged in: link that provider to the current account. On success redirects to `/settings?linked={provider}`.
+- On failure the server redirects to `/login?oauth_error=<code>` (login mode) or `/settings?oauth_error=<code>` (link mode). Codes:
+  `not_configured`, `state_mismatch` (expired/forged attempt — just retry), `provider_error` (the provider refused or is unreachable), `access_denied` (user cancelled on the provider's page), `email_unverified` (provider gave no verified email), `registration_closed`, `account_disabled`, `already_linked` (that Google/GitHub account belongs to another user), `not_logged_in` (link mode without a session).
+
+## Error codes worth translating
+
+The console should show a localized message for these `error.code` values and fall back to `error.message` for anything else (e.g. `invalid_request` details meant for admins):
+`unauthorized`, `forbidden`, `not_found`, `internal_error`, `rate_limited`, `invalid_credentials` (wrong email or password), `wrong_password` (current password incorrect when changing it), `invalid_email`, `weak_password`, `email_taken`, `registration_closed`, `account_disabled`, `invalid_code` (redeem code invalid or used), `slug_taken`, `last_login_method`, `cross_origin`, plus the OAuth codes above.
 
 ## User (logged in)
 

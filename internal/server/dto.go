@@ -10,17 +10,18 @@ import (
 // JSON shapes of the console API (see docs/console-api.md). Money is USD.
 
 type userJSON struct {
-	ID        int64     `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Role      string    `json:"role"`
-	Balance   float64   `json:"balance"`
-	Disabled  bool      `json:"disabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	Role        string    `json:"role"`
+	Balance     float64   `json:"balance"`
+	Disabled    bool      `json:"disabled"`
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func userDTO(u *store.User) userJSON {
-	return userJSON{u.ID, u.Email, u.Name, u.Role, store.ToUSD(u.Balance), u.Disabled, u.CreatedAt}
+	return userJSON{u.ID, u.Email, u.Name, u.Role, store.ToUSD(u.Balance), u.Disabled, u.HasPassword(), u.CreatedAt}
 }
 
 type keyJSON struct {

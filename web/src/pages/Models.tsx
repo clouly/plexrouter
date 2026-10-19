@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import { useT, type MessageKey } from "../i18n";
 import { useAsync, useDocumentTitle } from "../lib/hooks";
-import { formatContext, formatInt, formatPrice } from "../lib/format";
+import { formatContext, formatPrice } from "../lib/format";
 import type { PublicModel } from "../types";
 import { Card, PageHeader } from "../components/Card";
 import { CopyButton } from "../components/CopyButton";
@@ -72,7 +72,7 @@ export function ModelsPage() {
       </div>
       {models.data && (
         <div className="mb-2 text-xs text-muted">
-          {q.trim() ? t("models.countFiltered", { n: formatInt(list.length), total: formatInt(total) }) : t("models.count", { n: formatInt(total) })}
+          {q.trim() ? t("models.countFiltered", { n: list.length, total }) : t("models.count", { n: total })}
         </div>
       )}
       <Card flush>

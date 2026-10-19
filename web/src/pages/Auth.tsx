@@ -1,6 +1,7 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api";
+import { translateErrorCode } from "../i18n";
 import { useAuth, useAppName } from "../auth";
 import { useT } from "../i18n";
 import { useDocumentTitle } from "../lib/hooks";
@@ -8,7 +9,9 @@ import { Button } from "../components/Button";
 import { Input } from "../components/Input";
 import { Icon } from "../components/Icon";
 import { Notice } from "../components/Card";
-import { LangToggle, ThemeToggle } from "../layout/Layout";
+import { ThemeToggle } from "../layout/Layout";
+import { LanguageMenu } from "../components/LanguageMenu";
+import { OAuthButtons } from "../components/OAuth";
 
 function AuthShell({ title, subtitle, children, footer }: { title: string; subtitle?: string; children: ReactNode; footer?: ReactNode }) {
   const name = useAppName();
@@ -16,14 +19,14 @@ function AuthShell({ title, subtitle, children, footer }: { title: string; subti
   return (
     <div className="flex min-h-dvh flex-col">
       <header className="flex h-14 items-center justify-between px-4 sm:px-6">
-        <Link to="/models" className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-accent text-accent-fg">
+        <Link to="/models" className="flex min-w-0 items-center gap-2 font-semibold tracking-tight">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-fg">
             <Icon name="zap" className="size-4" strokeWidth={2.2} />
           </span>
-          {name}
+          <span className="truncate">{name}</span>
         </Link>
         <div className="flex items-center gap-1">
-          <LangToggle />
+          <LanguageMenu />
           <ThemeToggle />
         </div>
       </header>
@@ -47,6 +50,29 @@ function AuthShell({ title, subtitle, children, footer }: { title: string; subti
   );
 }
 
+/**
+ * Reads `?oauth_error=<code>` once (set by the server after a failed Google/GitHub sign-in),
+ * returns its localized text, and strips the param from the URL.
+ */
+function useOAuthError(): string {
+  const t = useT();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [code] = useState(() => new URLSearchParams(location.search).get("oauth_error"));
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has("oauth_error")) return;
+    params.delete("oauth_error");
+    const search = params.toString();
+    navigate({ pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash }, { replace: true, state: location.state });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!code) return "";
+  return translateErrorCode(code) ?? t("auth.oauthFailed", { code });
+}
+
 function useAfterAuth() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -60,13 +86,18 @@ export function LoginPage() {
   const done = useAfterAuth();
   const location = useLocation();
   useDocumentTitle(t("auth.login"), config?.name);
+  const oauthError = useOAuthError();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The OAuth error stays until the user tries the email form.
+  const [oauthDismissed, setOauthDismissed] = useState(false);
+  const shownError = error || (oauthDismissed ? "" : oauthError);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setOauthDismissed(true);
     if (!email.trim() || !password) {
       setError(t("auth.fillAll"));
       return;
@@ -99,8 +130,13 @@ export function LoginPage() {
         )
       }
     >
+      {shownError && (
+        <div role="alert" className="mb-4">
+          <Notice tone="danger">{shownError}</Notice>
+        </div>
+      )}
+      <OAuthButtons providers={config?.oauth_providers ?? []} disabled={busy} />
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-        {error && <Notice tone="danger">{error}</Notice>}
         <Input label={t("auth.email")} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} autoFocus />
         <Input
           label={t("auth.password")}
@@ -164,8 +200,13 @@ export function RegisterPage() {
         </>
       }
     >
+      {error && (
+        <div role="alert" className="mb-4">
+          <Notice tone="danger">{error}</Notice>
+        </div>
+      )}
+      <OAuthButtons providers={config?.oauth_providers ?? []} disabled={busy} />
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-        {error && <Notice tone="danger">{error}</Notice>}
         <Input label={t("auth.email")} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} autoFocus required />
         <Input label={t("auth.nameOptional")} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
         <Input

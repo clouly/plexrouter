@@ -9,6 +9,8 @@ export interface User {
   role: Role;
   balance: number; // USD
   disabled: boolean;
+  /** false for accounts created via Google/GitHub that never set a password. */
+  has_password: boolean;
   created_at: string;
 }
 
@@ -120,6 +122,19 @@ export interface AppConfig {
   name: string;
   version: string;
   allow_register: boolean;
+  /** Only the third-party sign-in providers configured on the server. */
+  oauth_providers: OAuthProvider[];
+}
+
+export type OAuthProvider = "google" | "github";
+
+export const OAUTH_PROVIDERS: OAuthProvider[] = ["google", "github"];
+
+/** A third-party account linked to the current user. */
+export interface Identity {
+  provider: OAuthProvider;
+  email: string;
+  created_at: string;
 }
 
 export interface Paginated<T> {

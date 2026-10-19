@@ -1,3 +1,4 @@
+import { errorMessage } from "../api";
 import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 import { cx } from "../lib/cx";
 import { useT } from "../i18n";
@@ -107,7 +108,7 @@ export function TableState({
   if (error) {
     content = (
       <div className="flex flex-col items-center gap-2">
-        <span className="text-red-600 dark:text-red-400">{error.message}</span>
+        <span className="text-red-600 dark:text-red-400">{errorMessage(error)}</span>
         {onRetry && (
           <Button size="sm" icon="refresh" onClick={onRetry}>
             {t("common.retry")}

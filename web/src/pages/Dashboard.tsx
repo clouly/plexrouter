@@ -69,7 +69,7 @@ export function DashboardPage() {
         <StatCard
           label={t("dashboard.tokens")}
           value={formatTokens(s?.total_tokens)}
-          hint={s ? t("dashboard.tokensExact", { n: formatInt(s.total_tokens) }) : undefined}
+          hint={s ? t("dashboard.tokensExact", { n: s.total_tokens }) : undefined}
           loading={loading}
         />
       </div>

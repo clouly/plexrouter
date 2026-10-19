@@ -150,6 +150,17 @@ CREATE TABLE redeem_codes (
 	used_at    INTEGER,
 	created_at INTEGER NOT NULL
 );
+`, `
+CREATE TABLE user_identities (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	provider   TEXT    NOT NULL,
+	subject    TEXT    NOT NULL,
+	email      TEXT    NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	UNIQUE (provider, subject),
+	UNIQUE (user_id, provider)
+);
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

@@ -1,5 +1,12 @@
-// English messages. This is the source of truth for message keys: zh-CN must define every key.
-// Placeholders use {name} syntax.
+// English messages. This is the source of truth for message keys: every other locale in this
+// folder is typed Record<MessageKey, string>, so a missing key fails the build. English is
+// bundled with the app and is the runtime fallback for any missing value.
+//
+// Placeholders use {name} syntax; numeric values are formatted for the active locale.
+// Plurals use a small ICU subset: {n, plural, =0 {none} one {# item} other {# items}}
+// where "#" is the formatted number. Categories come from Intl.PluralRules for the locale
+// (zero, one, two, few, many, other; "other" is required). Other {placeholders} may appear
+// inside a branch.
 export const en = {
   // Navigation / shell
   "nav.dashboard": "Dashboard",
@@ -88,6 +95,9 @@ export const en = {
   "auth.createAccount": "Create account",
   "auth.noAccount": "Don't have an account?",
   "auth.haveAccount": "Already have an account?",
+  "auth.or": "or",
+  "auth.continueWith": "Continue with {provider}",
+  "auth.oauthFailed": "Sign-in failed ({code}). Please try again.",
 
   // Dashboard
   "dashboard.title": "Dashboard",
@@ -100,17 +110,17 @@ export const en = {
   "dashboard.spend": "Spend",
   "dashboard.requests": "Requests",
   "dashboard.tokens": "Tokens",
-  "dashboard.tokensExact": "{n} tokens",
-  "dashboard.inLastDays": "Last {n} days",
+  "dashboard.tokensExact": "{n, plural, one {# token} other {# tokens}}",
+  "dashboard.inLastDays": "{n, plural, one {Last day} other {Last # days}}",
   "dashboard.dailySpend": "Daily spend",
-  "dashboard.dailySpendDesc": "Cost per day over the last {n} days.",
+  "dashboard.dailySpendDesc": "{n, plural, one {Cost over the last day.} other {Cost per day over the last # days.}}",
   "dashboard.noUsage": "No usage in this period",
   "dashboard.quickStart": "Quick start",
   "dashboard.quickStartDesc": "Point any OpenAI-compatible client at this base URL.",
   "dashboard.createKey": "Create an API key",
   "dashboard.readDocs": "Read the docs",
   "dashboard.topModels": "Top models",
-  "dashboard.topModelsDesc": "By spend over the last {n} days.",
+  "dashboard.topModelsDesc": "{n, plural, one {By spend over the last day.} other {By spend over the last # days.}}",
   "dashboard.viewLogs": "View logs",
   "dashboard.share": "Share of spend",
 
@@ -156,13 +166,13 @@ export const en = {
   "models.sortOutputAsc": "Output price: low to high",
   "models.sortOutputDesc": "Output price: high to low",
   "models.sortContextDesc": "Context: largest first",
-  "models.count": "{n} models",
-  "models.countFiltered": "{n} of {total} models",
+  "models.count": "{n, plural, one {# model} other {# models}}",
+  "models.countFiltered": "{total, plural, one {{n} of # model} other {{n} of # models}}",
   "models.context": "Context",
   "models.input": "Input",
   "models.output": "Output",
   "models.perMillion": "Prices per 1M tokens",
-  "models.providers": "{n} providers",
+  "models.providers": "{n, plural, one {# provider} other {# providers}}",
   "models.copySlug": "Copy model ID",
   "models.emptyTitle": "No models available",
   "models.emptyDesc": "An administrator needs to add and enable models first.",
@@ -254,6 +264,20 @@ export const en = {
   "settings.updatePassword": "Update password",
   "settings.passwordChanged": "Password updated",
   "settings.preferences": "Preferences",
+  "settings.setPassword": "Set a password",
+  "settings.setPasswordDesc": "You sign in with Google or GitHub. Add a password to also log in with your email. Use at least 8 characters.",
+  "settings.setPasswordButton": "Set password",
+  "settings.passwordSet": "Password set",
+  "settings.connectedAccounts": "Connected accounts",
+  "settings.connectedAccountsDesc": "Sign in with a third-party account instead of a password.",
+  "settings.connect": "Connect",
+  "settings.disconnect": "Disconnect",
+  "settings.notConnected": "Not connected",
+  "settings.connectedOn": "Connected {date}",
+  "settings.disconnectTitle": "Disconnect {provider}?",
+  "settings.disconnectMessage": "You will no longer be able to sign in with the {provider} account {email}.",
+  "settings.disconnected": "{provider} disconnected",
+  "settings.linked": "{provider} account connected",
 
   // Admin: overview
   "adminOverview.title": "Overview",
@@ -386,7 +410,7 @@ export const en = {
   // Admin: users
   "users.title": "Users",
   "users.desc": "Manage accounts, roles and credit balances.",
-  "users.count": "{n} users",
+  "users.count": "{n, plural, one {# user} other {# users}}",
   "users.search": "Search email or name…",
   "users.user": "User",
   "users.you": "you",
@@ -433,12 +457,12 @@ export const en = {
   "redeem.countHint": "1–100 codes per batch.",
   "redeem.countInvalid": "Enter a whole number from 1 to 100.",
   "redeem.totalValue": "Total value: {value}",
-  "redeem.generatedToast": "Generated {n} codes",
-  "redeem.generatedTitle": "{n} codes generated",
+  "redeem.generatedToast": "{n, plural, one {Generated # code} other {Generated # codes}}",
+  "redeem.generatedTitle": "{n, plural, one {# code generated} other {# codes generated}}",
   "redeem.generatedDesc": "Each code is worth {amount}.",
   "redeem.generatedHint": "Copy the codes now to share them. They also stay listed on this page until redeemed.",
   "redeem.copyAll": "Copy all",
-  "redeem.count": "{n} codes",
+  "redeem.count": "{n, plural, one {# code} other {# codes}}",
   "redeem.code": "Code",
   "redeem.used": "Used",
   "redeem.unused": "Unused",
@@ -448,6 +472,34 @@ export const en = {
   "redeem.deleteTitle": "Delete redeem code?",
   "redeem.deleteMessage": "{code} ({amount}) will no longer be redeemable.",
   "redeem.deleted": "Code deleted",
+
+  // API error codes (ApiError.code → errors.<code>); see docs/console-api.md
+  "errors.unauthorized": "Please log in to continue.",
+  "errors.forbidden": "You don't have permission to do that.",
+  "errors.not_found": "The requested item was not found.",
+  "errors.internal_error": "Something went wrong on the server. Please try again.",
+  "errors.rate_limited": "Too many requests. Please wait a moment and try again.",
+  "errors.invalid_credentials": "Incorrect email or password.",
+  "errors.wrong_password": "Your current password is incorrect.",
+  "errors.invalid_email": "Please enter a valid email address.",
+  "errors.weak_password": "Password is too weak. Use at least 8 characters.",
+  "errors.email_taken": "An account with this email already exists.",
+  "errors.registration_closed": "Registration is closed, so new accounts can't be created right now.",
+  "errors.account_disabled": "This account has been disabled.",
+  "errors.invalid_code": "This redeem code is invalid or has already been used.",
+  "errors.slug_taken": "A model with this slug already exists.",
+  "errors.last_login_method": "You can't remove your only way to sign in. Set a password or connect another account first.",
+  "errors.cross_origin": "The request was blocked because it didn't come from this site. Reload the page and try again.",
+  "errors.not_configured": "This sign-in method isn't set up on the server.",
+  "errors.state_mismatch": "The sign-in attempt expired. Please try again.",
+  "errors.provider_error": "The sign-in provider refused the request or couldn't be reached. Please try again.",
+  "errors.access_denied": "Sign-in was cancelled.",
+  "errors.email_unverified": "That account has no verified email address.",
+  "errors.already_linked": "That account is already connected to another user.",
+  "errors.not_logged_in": "Please log in first, then connect the account.",
+  "errors.network_error": "Can't reach the server. Check your connection and try again.",
 } as const;
 
 export type MessageKey = keyof typeof en;
+
+export default en;

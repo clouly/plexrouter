@@ -17,6 +17,7 @@ import (
 
 	"github.com/clouly/plexrouter/internal/config"
 	"github.com/clouly/plexrouter/internal/gateway"
+	"github.com/clouly/plexrouter/internal/oauth"
 	"github.com/clouly/plexrouter/internal/secure"
 	"github.com/clouly/plexrouter/internal/store"
 )
@@ -30,11 +31,19 @@ type Server struct {
 	version string
 	web     fs.FS // built console (index.html + assets); may be empty
 	limiter *rateLimiter
+	oauth   map[string]*oauth.Provider // configured sign-in providers by name
 }
 
 func New(cfg *config.Config, st *store.Store, box *secure.Box, gw *gateway.Gateway, web fs.FS, version string, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, store: st, box: box, gw: gw, web: web, version: version, log: log,
-		limiter: newRateLimiter(20, time.Minute)}
+	s := &Server{cfg: cfg, store: st, box: box, gw: gw, web: web, version: version, log: log,
+		limiter: newRateLimiter(20, time.Minute), oauth: map[string]*oauth.Provider{}}
+	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
+		s.SetOAuthProvider(oauth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret))
+	}
+	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
+		s.SetOAuthProvider(oauth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret))
+	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -48,6 +57,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/register", s.limited(s.handleRegister))
 	mux.HandleFunc("POST /api/auth/login", s.limited(s.handleLogin))
 	mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/auth/oauth/{provider}", s.limited(s.handleOAuthStart))
+	mux.HandleFunc("GET /api/auth/oauth/{provider}/callback", s.handleOAuthCallback)
+	mux.HandleFunc("GET /api/me/identities", s.user(s.handleListIdentities))
+	mux.HandleFunc("DELETE /api/me/identities/{provider}", s.user(s.handleUnlinkIdentity))
 	mux.HandleFunc("GET /api/me", s.user(s.handleMe))
 	mux.HandleFunc("POST /api/me/password", s.user(s.handleChangePassword))
 
@@ -189,8 +202,10 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", "not found")
-	case errors.Is(err, store.ErrEmailTaken), errors.Is(err, store.ErrSlugTaken):
-		writeErr(w, http.StatusConflict, "conflict", err.Error())
+	case errors.Is(err, store.ErrEmailTaken):
+		writeErr(w, http.StatusConflict, "email_taken", err.Error())
+	case errors.Is(err, store.ErrSlugTaken):
+		writeErr(w, http.StatusConflict, "slug_taken", err.Error())
 	case errors.Is(err, store.ErrCodeInvalid):
 		writeErr(w, http.StatusBadRequest, "invalid_code", err.Error())
 	case errors.Is(err, context.Canceled):

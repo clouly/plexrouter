@@ -3,7 +3,7 @@ import { api, errorMessage } from "../../api";
 import { useAuth } from "../../auth";
 import { useT } from "../../i18n";
 import { useAsync, useDocumentTitle } from "../../lib/hooks";
-import { formatDateTime, formatInt, formatUSD, parseNumber } from "../../lib/format";
+import { formatDateTime, formatUSD, parseNumber } from "../../lib/format";
 import type { RedeemCode } from "../../types";
 import { Card, Notice, PageHeader } from "../../components/Card";
 import { Badge } from "../../components/Badge";
@@ -70,7 +70,7 @@ export function AdminRedeemCodesPage() {
             {t("common.refresh")}
           </Button>
         }
-        title={t("redeem.count", { n: formatInt(total) })}
+        title={t("redeem.count", { n: total })}
       >
         <Table stickyLast minWidth={860}>
           <THead>

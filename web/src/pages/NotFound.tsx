@@ -1,9 +1,12 @@
 import { Link } from "react-router-dom";
 import { useT } from "../i18n";
+import { useAppName } from "../auth";
+import { useDocumentTitle } from "../lib/hooks";
 import { EmptyState } from "../components/EmptyState";
 
 export function NotFoundPage() {
   const t = useT();
+  useDocumentTitle(t("notFound.title"), useAppName());
   return (
     <EmptyState
       icon="alert"

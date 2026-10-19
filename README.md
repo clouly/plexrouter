@@ -12,7 +12,8 @@
 - **Native adapters** — requests are translated to the Anthropic Messages API and the Gemini API (including tool calls and streaming); OpenAI-compatible upstreams get a pass-through that preserves extra fields.
 - **Routing and fallback** — each model (`openai/gpt-4o`) can be served by several providers, tried in priority order. Clients can also pass `models: [...]` to fall back to other models. Fallback happens transparently before the first byte is sent.
 - **Credits and billing** — prices per 1M input/output tokens per model; every request is charged exactly (nano-dollar precision) from the account balance. Per-key credit limits, redeem codes, admin adjustments, signup bonus.
-- **Web console** — users manage API keys, see usage, logs and spend charts, browse the model catalog and docs; admins manage providers (with connection test and one-click model import), models and endpoints, users, request logs and redeem codes. English and 简体中文, light and dark.
+- **Sign in with Google / GitHub** — optional OAuth login, with automatic account linking by verified email.
+- **Web console** — users manage API keys, see usage, logs and spend charts, browse the model catalog and docs; admins manage providers (with connection test and one-click model import), models and endpoints, users, request logs and redeem codes. 10 languages (English, 简体中文, 繁體中文, 日本語, 한국어, Español, Français, Deutsch, Português, Русский), light and dark.
 - **Easy to run** — one static binary, embedded SQLite (pure Go, no CGO), zero required config. Docker image and docker-compose included.
 - **Secure defaults** — provider API keys are encrypted at rest (AES-256-GCM), only hashes of user API keys are stored, bcrypt passwords, HttpOnly session cookies, CSRF protection, login rate limiting.
 
@@ -155,7 +156,19 @@ Everything is configured with environment variables (see [`.env.example`](.env.e
 | `PLEXROUTER_ADMIN_EMAIL` / `PLEXROUTER_ADMIN_PASSWORD` | | Create this admin on first start |
 | `PLEXROUTER_REQUEST_TIMEOUT` | `10m` | Upper bound for one upstream request |
 | `PLEXROUTER_TRUST_PROXY` | `false` | Use `X-Forwarded-For` for client IPs (behind a reverse proxy) |
+| `PLEXROUTER_PUBLIC_URL` | from request | Public base URL, used for OAuth callbacks |
+| `PLEXROUTER_GOOGLE_CLIENT_ID` / `_SECRET` | | Enable “Sign in with Google” |
+| `PLEXROUTER_GITHUB_CLIENT_ID` / `_SECRET` | | Enable “Sign in with GitHub” |
 | `PLEXROUTER_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+
+### Sign in with Google / GitHub
+
+Optional. Each button appears on the login page once its client ID and secret are set. The callback URL is `<PLEXROUTER_PUBLIC_URL>/api/auth/oauth/<provider>/callback`. Set `PLEXROUTER_PUBLIC_URL` to the address users open, e.g. `https://api.example.com`. If it is unset, the address is taken from the request.
+
+- **Google**: [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) → *Create credentials → OAuth client ID → Web application*. Add `https://api.example.com/api/auth/oauth/google/callback` as an authorized redirect URI, then set `PLEXROUTER_GOOGLE_CLIENT_ID` / `PLEXROUTER_GOOGLE_CLIENT_SECRET`.
+- **GitHub**: [Settings → Developer settings → OAuth Apps → New OAuth App](https://github.com/settings/developers). Set the authorization callback URL to `https://api.example.com/api/auth/oauth/github/callback`, then set `PLEXROUTER_GITHUB_CLIENT_ID` / `PLEXROUTER_GITHUB_CLIENT_SECRET`.
+
+A Google or GitHub account is linked to an existing PlexRouter account automatically when the verified email addresses match. Otherwise a new account is created, unless registration is disabled. Users can connect or disconnect providers, and set a password, under **Settings**.
 
 ## How billing works
 
