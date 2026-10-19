@@ -240,7 +240,7 @@ make test       # Go 测试（使用模拟上游的端到端测试）
 - 按权重负载均衡、按价格/延迟选路
 - OpenRouter 风格的路由参数（`provider.order`、`sort`、`allow_fallbacks`）和单次请求用量查询接口
 
-欢迎贡献代码，较大的改动请先开 issue 讨论。
+欢迎贡献代码，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；较大的改动请先开 issue 讨论。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。各版本的变更和升级注意事项见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

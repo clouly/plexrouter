@@ -241,7 +241,7 @@ make test       # Go tests (end-to-end against fake upstreams)
 - Weighted load balancing and price/latency-based routing
 - OpenRouter-style routing parameters (`provider.order`, `sort`, `allow_fallbacks`) and a generation-stats endpoint
 
-Contributions are welcome — please open an issue to discuss larger changes first.
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), and please open an issue to discuss larger changes first. Report security problems privately as described in [SECURITY.md](SECURITY.md). What changed in each version, including upgrade notes, is in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

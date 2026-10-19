@@ -1,0 +1,54 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Don't paste API keys, secrets or other people's data.** Security problems go through [private reporting](https://github.com/local4a/plexrouter/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The request you sent (e.g. curl, with the key removed) or the steps in the console.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Gateway API (/v1/chat/completions, /v1/embeddings, /v1/models)
+        - Anthropic Messages API / Claude Code
+        - Provider adapter (OpenAI, Anthropic, Gemini, OpenAI-compatible)
+        - Billing, credits, limits
+        - Sign-in (Google / GitHub)
+        - Web console
+        - Deployment (Docker, binary)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Upstream provider and model
+      placeholder: e.g. anthropic / claude-sonnet-4-5-20250929
+  - type: input
+    id: version
+    attributes:
+      label: PlexRouter version
+      description: Output of `plexrouter -version` or the image tag
+      placeholder: v0.2.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant server log lines or the upstream error message.
+      render: text

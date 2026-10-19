@@ -32,10 +32,17 @@ jobs:
               -o "dist/plexrouter-${GITHUB_REF_NAME}-${os}-${arch}${ext}" ./cmd/plexrouter
           done
           cd dist && sha256sum * > checksums.txt
+      - name: Release notes from CHANGELOG.md
+        run: |
+          # The section for this version, between its heading and the next one.
+          awk -v v="${GITHUB_REF_NAME#v}" '
+            /^## \[/ { if (on) exit; if (index($0, "[" v "]")) { on = 1; next } }
+            on' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: notes.md
 
   docker:
     runs-on: ubuntu-latest
