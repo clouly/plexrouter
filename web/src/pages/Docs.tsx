@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { api } from "../api";
 import { useAuth } from "../auth";
 import { useT, type MessageKey } from "../i18n";
-import { useDocumentTitle } from "../lib/hooks";
+import { useAsync, useDocumentTitle } from "../lib/hooks";
 import { gatewayBaseUrl } from "../lib/gateway";
 import { PageHeader } from "../components/Card";
 import { CodeBlock, CodeTabs, InlineCode } from "../components/CodeBlock";
@@ -11,8 +12,15 @@ import { CopyButton } from "../components/CopyButton";
 const MODEL = "openai/gpt-4o-mini";
 const FALLBACK = ["anthropic/claude-3.5-haiku", "google/gemini-2.0-flash"];
 const EMBED_MODEL = "openai/text-embedding-3-small";
+/** Used in the Anthropic examples when the catalog has no Claude model (or can't be loaded). */
+const CLAUDE_MODEL = "anthropic/claude-sonnet-4.5";
 
-function examples(base: string) {
+/** A Claude model from the live catalog for the Anthropic examples, else any chat model, else the default. */
+function pickClaudeModel(ids: string[]): string {
+  return ids.find((id) => /claude/i.test(id)) ?? ids.find((id) => !/embed/i.test(id)) ?? CLAUDE_MODEL;
+}
+
+function examples(base: string, origin: string, claude: string) {
   const chat = [
     {
       label: "curl",
@@ -177,7 +185,11 @@ console.log(emb.data[0].embedding.length);`,
       "owned_by": "openai",
       "name": "GPT-4o mini",
       "context_length": 128000,
-      "pricing": { "prompt": "0.00000015", "completion": "0.0000006" }
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "input_cache_read": "0.000000075"
+      }
     }
   ]
 }`;
@@ -195,7 +207,300 @@ console.log(emb.data[0].embedding.length);`,
   }
 }`;
 
-  return { chat, stream, fallback, embeddings, models, key };
+  const claudeCode = `# Point Claude Code at this gateway (it appends /v1/messages itself)
+export ANTHROPIC_BASE_URL="${origin}"
+export ANTHROPIC_AUTH_TOKEN="sk-plex-..."
+
+# Optional: pick the model — any model ID from the catalog, from any provider
+export ANTHROPIC_MODEL="${claude}"
+# export ANTHROPIC_MODEL="${MODEL}"
+# Model for background tasks (titles, summaries); defaults to the main model
+# export ANTHROPIC_DEFAULT_HAIKU_MODEL="${claude}"
+
+# Optional: show this gateway's Claude models in the /model picker
+# export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+
+claude`;
+
+  const messages = [
+    {
+      label: "curl",
+      code: `curl ${origin}/v1/messages \\
+  -H "x-api-key: $PLEXROUTER_API_KEY" \\
+  -H "anthropic-version: 2023-06-01" \\
+  -H "content-type: application/json" \\
+  -d '{
+    "model": "${claude}",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'`,
+    },
+    {
+      label: "Python",
+      code: `# pip install anthropic
+import os
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="${origin}",
+    api_key=os.environ["PLEXROUTER_API_KEY"],  # sk-plex-...
+)
+
+message = client.messages.create(
+    model="${claude}",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(message.content[0].text)
+print(message.usage)`,
+    },
+    {
+      label: "TypeScript",
+      code: `// npm install @anthropic-ai/sdk
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({
+  baseURL: "${origin}",
+  apiKey: process.env.PLEXROUTER_API_KEY, // sk-plex-...
+});
+
+const message = await client.messages.create({
+  model: "${claude}",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello!" }],
+});
+for (const block of message.content) {
+  if (block.type === "text") console.log(block.text);
+}`,
+    },
+  ];
+
+  const messagesStream = [
+    {
+      label: "Python",
+      code: `with client.messages.stream(
+    model="${claude}",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Write a haiku about routers."}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)`,
+    },
+    {
+      label: "TypeScript",
+      code: `const stream = client.messages.stream({
+  model: "${claude}",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Write a haiku about routers." }],
+});
+stream.on("text", (text) => process.stdout.write(text));
+await stream.finalMessage();`,
+    },
+    {
+      label: "curl",
+      code: `curl -N ${origin}/v1/messages \\
+  -H "x-api-key: $PLEXROUTER_API_KEY" \\
+  -H "anthropic-version: 2023-06-01" \\
+  -H "content-type: application/json" \\
+  -d '{
+    "model": "${claude}",
+    "max_tokens": 1024,
+    "stream": true,
+    "messages": [{"role": "user", "content": "Write a haiku about routers."}]
+  }'`,
+    },
+  ];
+
+  const countTokens = `curl ${origin}/v1/messages/count_tokens \\
+  -H "x-api-key: $PLEXROUTER_API_KEY" \\
+  -H "anthropic-version: 2023-06-01" \\
+  -H "content-type: application/json" \\
+  -d '{
+    "model": "${claude}",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Response
+{ "input_tokens": 9 }`;
+
+  const reasoning = [
+    {
+      label: "reasoning_effort",
+      code: `curl ${base}/chat/completions \\
+  -H "Authorization: Bearer $PLEXROUTER_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${claude}",
+    "reasoning_effort": "high",
+    "messages": [{"role": "user", "content": "Which is larger, 9.11 or 9.9?"}]
+  }'`,
+    },
+    {
+      label: "reasoning",
+      code: `curl ${base}/chat/completions \\
+  -H "Authorization: Bearer $PLEXROUTER_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${claude}",
+    "reasoning": {"effort": "medium", "max_tokens": 4000, "exclude": false},
+    "messages": [{"role": "user", "content": "Which is larger, 9.11 or 9.9?"}]
+  }'`,
+    },
+    {
+      label: "Python",
+      code: `resp = client.chat.completions.create(
+    model="${claude}",
+    messages=[{"role": "user", "content": "Which is larger, 9.11 or 9.9?"}],
+    reasoning_effort="high",  # or extra_body={"reasoning": {"max_tokens": 4000}}
+)
+msg = resp.choices[0].message
+print(getattr(msg, "reasoning", None))  # the model's reasoning text
+print(msg.content)                      # the final answer`,
+    },
+  ];
+
+  const reasoningResponse = `{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "reasoning": "Compare the decimals digit by digit: 9.9 = 9.90 and 9.90 > 9.11…",
+      "content": "9.9 is larger than 9.11."
+    }
+  }]
+}
+// Streaming: reasoning arrives in choices[0].delta.reasoning before delta.content`;
+
+  const caching = [
+    {
+      label: "curl",
+      code: `curl ${base}/chat/completions \\
+  -H "Authorization: Bearer $PLEXROUTER_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${claude}",
+    "messages": [
+      {
+        "role": "system",
+        "content": [
+          {
+            "type": "text",
+            "text": "You answer questions about this handbook: <long document…>",
+            "cache_control": {"type": "ephemeral"}
+          }
+        ]
+      },
+      {"role": "user", "content": "What is the refund policy?"}
+    ]
+  }'`,
+    },
+    {
+      label: "Python",
+      code: `HANDBOOK = open("handbook.md").read()  # long, reused prompt prefix
+
+resp = client.chat.completions.create(
+    model="${claude}",
+    messages=[
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "You answer questions about this handbook:\\n" + HANDBOOK,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        },
+        {"role": "user", "content": "What is the refund policy?"},
+    ],
+)
+print(resp.usage.prompt_tokens_details)`,
+    },
+  ];
+
+  const cachingUsage = `"usage": {
+  "prompt_tokens": 12045,          // includes cached tokens
+  "completion_tokens": 230,
+  "total_tokens": 12275,
+  "prompt_tokens_details": {
+    "cached_tokens": 12000,        // read from the cache (billed at the cache read price)
+    "cache_write_tokens": 0        // written to the cache (billed at the cache write price)
+  },
+  "cost": 0.004935
+}`;
+
+  const structured = [
+    {
+      label: "curl",
+      code: `curl ${base}/chat/completions \\
+  -H "Authorization: Bearer $PLEXROUTER_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "${MODEL}",
+    "messages": [{"role": "user", "content": "Extract: Ada Lovelace, born 1815 in London."}],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "person",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "birth_year": {"type": "integer"},
+            "city": {"type": "string"}
+          },
+          "required": ["name", "birth_year", "city"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }'`,
+    },
+    {
+      label: "Python",
+      code: `import json
+
+resp = client.chat.completions.create(
+    model="${MODEL}",
+    messages=[{"role": "user", "content": "Extract: Ada Lovelace, born 1815 in London."}],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "person",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "birth_year": {"type": "integer"},
+                    "city": {"type": "string"},
+                },
+                "required": ["name", "birth_year", "city"],
+                "additionalProperties": False,
+            },
+        },
+    },
+)
+person = json.loads(resp.choices[0].message.content)
+print(person["name"], person["birth_year"])`,
+    },
+  ];
+
+  return {
+    chat,
+    stream,
+    fallback,
+    embeddings,
+    models,
+    key,
+    claudeCode,
+    messages,
+    messagesStream,
+    countTokens,
+    reasoning,
+    reasoningResponse,
+    caching,
+    cachingUsage,
+    structured,
+  };
 }
 
 const toc: { id: string; label: MessageKey }[] = [
@@ -203,6 +508,11 @@ const toc: { id: string; label: MessageKey }[] = [
   { id: "chat", label: "docs.chat" },
   { id: "streaming", label: "docs.streaming" },
   { id: "fallback", label: "docs.fallback" },
+  { id: "claude-code", label: "docs.claudeCode" },
+  { id: "messages", label: "docs.messages" },
+  { id: "reasoning", label: "docs.reasoning" },
+  { id: "caching", label: "docs.caching" },
+  { id: "structured", label: "docs.structured" },
   { id: "models", label: "docs.listModels" },
   { id: "key", label: "docs.keyInfo" },
   { id: "embeddings", label: "docs.embeddings" },
@@ -227,6 +537,15 @@ function Section({ id, title, children }: { id: string; title: string; children:
   );
 }
 
+/** Renders `backticked` parts of a translated string as inline code. */
+function Rich({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <InlineCode key={i}>{part}</InlineCode> : part))}
+    </>
+  );
+}
+
 function Endpoint({ method, path }: { method: string; path: string }) {
   return (
     <div className="inline-flex w-fit max-w-full items-center gap-2 rounded-md border border-line bg-surface px-2 py-1 font-mono text-xs text-fg">
@@ -241,7 +560,11 @@ export function DocsPage() {
   const { config, user } = useAuth();
   useDocumentTitle(t("nav.docs"), config?.name);
   const base = gatewayBaseUrl();
-  const ex = examples(base);
+  const origin = window.location.origin;
+  // Best effort: real model IDs make the Anthropic examples copy-pasteable.
+  const catalog = useAsync(() => api.models().then((r) => r.data.map((m) => m.id)).catch(() => [] as string[]), []);
+  const claude = pickClaudeModel(catalog.data ?? []);
+  const ex = examples(base, origin, claude);
 
   return (
     <>
@@ -284,6 +607,9 @@ export function DocsPage() {
                 {t("docs.browseModels")}
               </Link>
             </p>
+            <p>
+              <Rich text={t("docs.modelAliases")} />
+            </p>
             <CodeBlock lang="bash" code={`export PLEXROUTER_API_KEY="sk-plex-..."`} />
           </Section>
 
@@ -310,9 +636,90 @@ export function DocsPage() {
             <CodeTabs tabs={ex.fallback} />
           </Section>
 
+          <Section id="claude-code" title={t("docs.claudeCode")}>
+            <p>
+              <Rich text={t("docs.claudeCodeText")} />
+            </p>
+            <CodeBlock lang="bash" code={ex.claudeCode} />
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                <Rich text={t("docs.claudeCodeModels")} />
+              </li>
+              <li>
+                <Rich text={t("docs.claudeCodeAliases")} />
+              </li>
+              <li>
+                <Rich text={t("docs.claudeCodeOtherModels")} />
+              </li>
+              <li>
+                <Rich text={t("docs.claudeCodeBilling")} />
+              </li>
+            </ul>
+          </Section>
+
+          <Section id="messages" title={t("docs.messages")}>
+            <div className="flex flex-wrap gap-2">
+              <Endpoint method="POST" path="/v1/messages" />
+              <Endpoint method="POST" path="/v1/messages/count_tokens" />
+            </div>
+            <p>
+              <Rich text={t("docs.messagesText")} />
+            </p>
+            <p>
+              <Rich text={t("docs.messagesAuth")} />
+            </p>
+            <CodeTabs tabs={ex.messages} />
+            <p>
+              <Rich text={t("docs.messagesStreaming")} />
+            </p>
+            <CodeTabs tabs={ex.messagesStream} />
+            <p>
+              <Rich text={t("docs.countTokensText")} />
+            </p>
+            <CodeBlock lang="bash" code={ex.countTokens} />
+          </Section>
+
+          <Section id="reasoning" title={t("docs.reasoning")}>
+            <p>
+              <Rich text={t("docs.reasoningText")} />
+            </p>
+            <CodeTabs tabs={ex.reasoning} />
+            <p>
+              <Rich text={t("docs.reasoningOutput")} />
+            </p>
+            <CodeBlock lang="json" code={ex.reasoningResponse} />
+          </Section>
+
+          <Section id="caching" title={t("docs.caching")}>
+            <p>
+              <Rich text={t("docs.cachingText")} />
+            </p>
+            <CodeTabs tabs={ex.caching} />
+            <p>
+              <Rich text={t("docs.cachingUsage")} />
+            </p>
+            <CodeBlock lang="json" code={ex.cachingUsage} />
+            <p>
+              <Rich text={t("docs.cachingBilling")} />{" "}
+              <Link to="/models" className="text-accent hover:underline">
+                {t("docs.browseModels")}
+              </Link>
+            </p>
+          </Section>
+
+          <Section id="structured" title={t("docs.structured")}>
+            <p>
+              <Rich text={t("docs.structuredText")} />
+            </p>
+            <CodeTabs tabs={ex.structured} />
+          </Section>
+
           <Section id="models" title={t("docs.listModels")}>
             <Endpoint method="GET" path="/v1/models" />
             <p>{t("docs.listModelsText")}</p>
+            <p>
+              <Rich text={t("docs.listModelsCache")} />
+            </p>
             <CodeBlock lang="bash" code={ex.models} />
           </Section>
 

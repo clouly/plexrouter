@@ -9,7 +9,13 @@ import (
 
 // openAI serves OpenAI and any OpenAI-compatible API (DeepSeek, Groq,
 // Together, Mistral, vLLM, Ollama, LM Studio…) by passing the body through.
-type openAI struct{ httpClient }
+type openAI struct {
+	httpClient
+	// official is the OpenAI API itself, which rejects fields it doesn't
+	// know; compatible servers get the body as sent (some, like OpenRouter,
+	// understand "reasoning" and "cache_control").
+	official bool
+}
 
 // Fields that belong to the gateway, not the upstream.
 var gatewayFields = []string{"models", "route", "provider", "transforms", "usage", "plugins"}
@@ -31,6 +37,16 @@ func (o *openAI) body(req *ChatRequest, upstreamModel string, stream bool) Objec
 		delete(body, f)
 	}
 	body["model"] = upstreamModel
+	if o.official {
+		if effort, _ := req.ReasoningRequest(); effort != "" && req.ReasoningEffort == "" {
+			if effort == "xhigh" {
+				effort = "high"
+			}
+			body["reasoning_effort"] = effort
+		}
+		delete(body, "reasoning")
+		body["messages"] = stripCacheControl(body["messages"])
+	}
 	if stream {
 		body["stream"] = true
 		opts, _ := body["stream_options"].(map[string]any)
@@ -44,6 +60,46 @@ func (o *openAI) body(req *ChatRequest, upstreamModel string, stream bool) Objec
 		delete(body, "stream_options")
 	}
 	return body
+}
+
+// stripCacheControl removes Anthropic-style cache_control markers from
+// message content parts.
+func stripCacheControl(messages any) any {
+	list, ok := messages.([]any)
+	if !ok {
+		return messages
+	}
+	out := make([]any, len(list))
+	for i, m := range list {
+		msg, ok := m.(map[string]any)
+		parts, isList := msg["content"].([]any)
+		if !ok || !isList {
+			out[i] = m
+			continue
+		}
+		cp := make(Object, len(msg))
+		for k, v := range msg {
+			cp[k] = v
+		}
+		newParts := make([]any, len(parts))
+		for j, p := range parts {
+			if pm, ok := p.(map[string]any); ok {
+				if _, has := pm["cache_control"]; has {
+					q := make(Object, len(pm))
+					for k, v := range pm {
+						if k != "cache_control" {
+							q[k] = v
+						}
+					}
+					p = q
+				}
+			}
+			newParts[j] = p
+		}
+		cp["content"] = newParts
+		out[i] = cp
+	}
+	return out
 }
 
 func (o *openAI) Chat(ctx context.Context, req *ChatRequest, upstreamModel string) (Object, error) {

@@ -8,7 +8,7 @@ import { formatInt, formatTokens, formatUSD } from "../lib/format";
 import { gatewayBaseUrl } from "../lib/gateway";
 import { Card, PageHeader, StatCard } from "../components/Card";
 import { BarChart } from "../components/BarChart";
-import { CodeBlock } from "../components/CodeBlock";
+import { CodeTabs } from "../components/CodeBlock";
 import { CopyButton } from "../components/CopyButton";
 import { ErrorState } from "../components/EmptyState";
 import { Icon } from "../components/Icon";
@@ -35,6 +35,13 @@ export function DashboardPage() {
     "model": "${exampleModel}",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`;
+
+  // Claude Code talks the Anthropic Messages API and appends /v1/messages itself.
+  const claudeCode = `export ANTHROPIC_BASE_URL="${window.location.origin}"
+export ANTHROPIC_AUTH_TOKEN="sk-plex-..."
+# Optional: any model from the catalog, from any provider
+export ANTHROPIC_MODEL="${exampleModel}"
+claude`;
 
   return (
     <>
@@ -94,7 +101,12 @@ export function DashboardPage() {
                 <CopyButton text={baseUrl} />
               </div>
             </div>
-            <CodeBlock code={snippet} lang="bash" />
+            <CodeTabs
+              tabs={[
+                { label: "curl", code: snippet },
+                { label: "Claude Code", code: claudeCode },
+              ]}
+            />
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
               <Link to="/keys?new=1" className="inline-flex items-center gap-1 font-medium text-accent hover:underline">
                 <Icon name="key" className="size-3.5" />

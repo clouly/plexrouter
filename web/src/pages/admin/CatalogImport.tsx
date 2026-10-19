@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { ApiError, api, errorMessage } from "../../api";
 import { useT } from "../../i18n";
 import { useAsync } from "../../lib/hooks";
-import { formatContext, formatInt, formatPrice, formatRelative, parseNumber } from "../../lib/format";
+import { formatCachePrice, formatContext, formatInt, formatPrice, formatRelative, parseNumber } from "../../lib/format";
 import { cx } from "../../lib/cx";
 import type { CatalogImportResult, CatalogModel, Provider } from "../../types";
 import { Notice } from "../../components/Card";
@@ -349,7 +349,7 @@ function CatalogRow({
         onChange={(e) => onCheck(e.target.checked)}
         aria-label={m.id}
       />
-      <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[minmax(0,1fr)_9.5rem_minmax(0,14rem)] sm:items-center sm:gap-3">
+      <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[minmax(0,1fr)_10.5rem_minmax(0,14rem)] sm:items-center sm:gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-[13px] font-medium" title={m.description || m.name}>
@@ -363,6 +363,11 @@ function CatalogRow({
           <div>
             {formatPrice(m.input_price)} / {formatPrice(m.output_price)}
           </div>
+          {(m.cache_read_price != null || m.cache_write_price != null) && (
+            <div className="whitespace-nowrap" title={t("adminModels.cachePricesTitle")}>
+              {t("catalog.cachePrices", { read: formatCachePrice(m.cache_read_price), write: formatCachePrice(m.cache_write_price) })}
+            </div>
+          )}
           <div>
             {t("models.context")} {formatContext(m.context_length)}
           </div>

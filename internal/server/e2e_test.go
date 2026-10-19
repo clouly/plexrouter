@@ -67,13 +67,13 @@ func fakeAnthropic(t *testing.T) *httptest.Server {
 		}
 		var body struct {
 			Model     string            `json:"model"`
-			System    string            `json:"system"`
+			System    json.RawMessage   `json:"system"`
 			MaxTokens int               `json:"max_tokens"`
 			Stream    bool              `json:"stream"`
 			Messages  []json.RawMessage `json:"messages"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
-		if body.System != "be brief" || body.MaxTokens == 0 || len(body.Messages) != 1 {
+		if string(body.System) != `[{"text":"be brief","type":"text"}]` || body.MaxTokens == 0 || len(body.Messages) != 1 {
 			t.Errorf("anthropic upstream got bad body: %+v", body)
 		}
 		if body.Stream {

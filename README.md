@@ -9,7 +9,8 @@
 ## Features
 
 - **One API for every model** — `POST /v1/chat/completions` in the OpenAI format (streaming, tools/function calling, images, JSON mode), `/v1/embeddings`, `/v1/models`. Works with the official OpenAI SDKs and anything that speaks the OpenAI API.
-- **Native adapters** — requests are translated to the Anthropic Messages API and the Gemini API (including tool calls and streaming); OpenAI-compatible upstreams get a pass-through that preserves extra fields.
+- **Anthropic Messages API and Claude Code** — `POST /v1/messages` passes through unchanged to Anthropic and is translated for every other provider, so Claude Code and Anthropic SDKs can use any model.
+- **Native adapters** — requests are translated to the Anthropic Messages API and the Gemini API (including tool calls and streaming); OpenAI-compatible upstreams get a pass-through that preserves extra fields. Reasoning effort, prompt caching (`cache_control`) and structured outputs are mapped across providers, and cached tokens are billed at cache prices.
 - **Routing and fallback** — each model (`openai/gpt-4o`) can be served by several providers, tried in priority order. Clients can also pass `models: [...]` to fall back to other models. Fallback happens transparently before the first byte is sent.
 - **Credits and billing** — prices per 1M input/output tokens per model; every request is charged exactly (nano-dollar precision) from the account balance. Per-key credit limits, redeem codes, admin adjustments, signup bonus.
 - **Built for operators** — your users never touch provider keys. Pools of upstream keys per provider with rotation; keys that are rejected or run out of credit are switched off automatically, rate-limited ones cool down, and failing endpoints are skipped by a circuit breaker. Track upstream cost next to revenue for profit reports, see provider health and alerts, and import models with reference prices from the OpenRouter catalog with your own markup.
@@ -144,8 +145,25 @@ The base URL is also served at `/api/v1`, so tools that expect an OpenRouter-sty
 |---|---|
 | `POST /v1/chat/completions` | Chat completions (OpenAI format, `stream: true` supported). Extra request field `models: string[]` lists fallback models. The response includes `provider` and `usage.cost` (USD). |
 | `POST /v1/embeddings` | Embeddings (OpenAI and OpenAI-compatible providers). |
+| `POST /v1/messages` | Anthropic Messages API (streaming, tools, thinking, caching), plus `/v1/messages/count_tokens`. Auth with `x-api-key` or `Authorization: Bearer`. |
 | `GET /v1/models` | Enabled models with context length and per-token pricing. |
 | `GET /v1/key` | Name, usage, limit and account balance of the calling key. |
+
+### Claude Code
+
+PlexRouter serves the Anthropic Messages API, so Claude Code works with any model in your catalog:
+
+```bash
+export ANTHROPIC_BASE_URL=https://api.example.com   # no /v1 — Claude Code appends /v1/messages
+export ANTHROPIC_AUTH_TOKEN=sk-plex-...
+export ANTHROPIC_MODEL=claude-sonnet-4-5            # optional; any model ID from the catalog
+claude
+```
+
+- Requests to Anthropic providers pass through **unchanged** (body byte-for-byte, all `anthropic-*` headers, streaming events, error bodies), so prompt caching, extended thinking, beta features and Claude Code's error recovery keep working. Other providers are translated to and from the OpenAI format.
+- Claude Code's own model names (`claude-sonnet-4-5-20250929`) resolve to the matching catalog model.
+- For a model Claude Code doesn't know (e.g. `openai/gpt-4o`), set `CLAUDE_CODE_MAX_CONTEXT_TOKENS` to its context window, and in auto mode `CLAUDE_CODE_AUTO_MODE_SERVER=0`.
+- `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` lists the gateway's Claude models in `/model`.
 
 ## Configuration
 
@@ -218,7 +236,6 @@ make test       # Go tests (end-to-end against fake upstreams)
 
 ## Roadmap
 
-- Native Anthropic `/v1/messages` endpoint (for Claude Code and Anthropic SDKs)
 - Online payments (Stripe, etc.)
 - More providers: Azure OpenAI, AWS Bedrock, Vertex AI
 - Weighted load balancing and price/latency-based routing

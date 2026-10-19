@@ -22,7 +22,8 @@ func (s *Server) handlePublicModels(w http.ResponseWriter, r *http.Request) {
 		if len(m.Endpoints) == 0 {
 			continue
 		}
-		out = append(out, publicModelJSON{m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice, len(m.Endpoints)})
+		out = append(out, publicModelJSON{m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice,
+			m.CacheReadPrice, m.CacheWritePrice, len(m.Endpoints)})
 	}
 	ok(w, map[string]any{"data": out})
 }

@@ -8,7 +8,7 @@ import type { PublicModel } from "../types";
 import { Card, PageHeader } from "../components/Card";
 import { CopyButton } from "../components/CopyButton";
 import { EmptyState, ErrorState, LoadingState } from "../components/EmptyState";
-import { SearchInput, Select } from "../components/Input";
+import { Checkbox, SearchInput, Select } from "../components/Input";
 
 type SortKey = "name" | "input_asc" | "input_desc" | "output_asc" | "output_desc" | "context_desc";
 
@@ -45,15 +45,18 @@ export function ModelsPage() {
   const models = useAsync(() => api.models(), []);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<SortKey>("name");
+  const [cacheOnly, setCacheOnly] = useState(false);
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const all = models.data?.data ?? [];
-    const filtered = needle
-      ? all.filter((m) => m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle))
-      : all;
+    const filtered = all.filter(
+      (m) =>
+        (!cacheOnly || m.cache_read_price != null) &&
+        (!needle || m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle) || m.description.toLowerCase().includes(needle)),
+    );
     return [...filtered].sort((a, b) => compare(a, b, sort) || (a.name || a.id).localeCompare(b.name || b.id));
-  }, [models.data, q, sort]);
+  }, [models.data, q, sort, cacheOnly]);
 
   const total = models.data?.data.length ?? 0;
 
@@ -70,11 +73,14 @@ export function ModelsPage() {
           ))}
         </Select>
       </div>
-      {models.data && (
-        <div className="mb-2 text-xs text-muted">
-          {q.trim() ? t("models.countFiltered", { n: list.length, total }) : t("models.count", { n: total })}
-        </div>
-      )}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+        <Checkbox checked={cacheOnly} onChange={setCacheOnly} label={t("models.filterCaching")} />
+        {models.data && (
+          <span className="text-xs text-muted">
+            {q.trim() || cacheOnly ? t("models.countFiltered", { n: list.length, total }) : t("models.count", { n: total })}
+          </span>
+        )}
+      </div>
       <Card flush>
         {models.error ? (
           <ErrorState error={models.error} onRetry={models.reload} />
@@ -121,6 +127,13 @@ function ModelRow({ m }: { m: PublicModel }) {
           <dt className="text-muted">{t("models.output")}</dt>
           <dd className="mt-0.5 font-medium tabular-nums">{formatPrice(m.output_price)}</dd>
         </div>
+        {(m.cache_read_price != null || m.cache_write_price != null) && (
+          <div className="col-span-3 flex flex-wrap gap-x-3 text-[11px] text-muted tabular-nums" title={t("models.cacheHint")}>
+            <span className="font-medium text-fg">{t("models.cache")}</span>
+            {m.cache_read_price != null && <span>{t("models.cacheRead", { price: formatPrice(m.cache_read_price) })}</span>}
+            {m.cache_write_price != null && <span>{t("models.cacheWrite", { price: formatPrice(m.cache_write_price) })}</span>}
+          </div>
+        )}
         <div className="col-span-3 text-[11px] text-muted">
           {t("models.perMillion")}
           {m.providers > 1 && <> · {t("models.providers", { n: m.providers })}</>}

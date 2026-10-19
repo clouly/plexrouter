@@ -41,6 +41,10 @@ export interface PublicModel {
   context_length: number;
   input_price: number; // USD / 1M prompt tokens
   output_price: number; // USD / 1M completion tokens
+  /** USD / 1M cached prompt tokens read; null = charged as input. */
+  cache_read_price: number | null;
+  /** USD / 1M prompt tokens written to cache; null = charged as input. */
+  cache_write_price: number | null;
   providers: number;
 }
 
@@ -51,6 +55,11 @@ export interface UsageLog {
   api_key_name: string;
   prompt_tokens: number;
   completion_tokens: number;
+  /** Included in prompt_tokens. */
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  /** Which gateway endpoint was called. */
+  api: GatewayApi;
   cost: number;
   latency_ms: number;
   status: "success" | "error";
@@ -63,6 +72,8 @@ export interface UsageLog {
   /** Admin only: name of the provider key used ("" if none). */
   provider_key?: string;
 }
+
+export type GatewayApi = "chat" | "messages" | "embeddings";
 
 export type TransactionType = "signup" | "redeem" | "adjust";
 
@@ -130,6 +141,9 @@ export interface Endpoint {
   /** USD / 1M tokens the operator pays this provider; null = unknown. */
   input_cost: number | null;
   output_cost: number | null;
+  /** null = same as input_cost. */
+  cache_read_cost: number | null;
+  cache_write_cost: number | null;
   /** Set while the endpoint is skipped after repeated failures. */
   circuit_open_until: string | null;
 }
@@ -142,6 +156,9 @@ export interface AdminModel {
   context_length: number;
   input_price: number;
   output_price: number;
+  /** null = charged as input. */
+  cache_read_price: number | null;
+  cache_write_price: number | null;
   enabled: boolean;
   created_at: string;
   endpoints: Endpoint[];
@@ -235,6 +252,8 @@ export interface CatalogModel {
   context_length: number;
   input_price: number;
   output_price: number;
+  cache_read_price: number | null;
+  cache_write_price: number | null;
   upstream_match: string | null;
   exists: boolean;
 }
@@ -282,6 +301,8 @@ export interface EndpointInput {
   enabled?: boolean;
   input_cost?: number | null;
   output_cost?: number | null;
+  cache_read_cost?: number | null;
+  cache_write_cost?: number | null;
 }
 
 export interface ModelInput {
@@ -291,6 +312,8 @@ export interface ModelInput {
   context_length?: number;
   input_price: number;
   output_price: number;
+  cache_read_price?: number | null;
+  cache_write_price?: number | null;
   enabled?: boolean;
   endpoints: EndpointInput[];
 }

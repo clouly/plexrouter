@@ -55,6 +55,11 @@ export function formatPrice(n: number): string {
   return formatUSD(n);
 }
 
+/** Cache price/cost per 1M tokens; null (= charged as the input price) shows as "—". */
+export function formatCachePrice(n: number | null | undefined): string {
+  return n === null || n === undefined ? "—" : formatUSD(n);
+}
+
 /** 1234567 → "1,234,567" (locale grouping) */
 export function formatInt(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";

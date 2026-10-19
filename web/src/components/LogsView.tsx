@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useId, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import { useT } from "../i18n";
+import { useT, type MessageKey } from "../i18n";
 import { useAsync, useDebounced } from "../lib/hooks";
 import { formatDateTime, formatInt, formatLatency, formatUSD } from "../lib/format";
 import { cx } from "../lib/cx";
-import type { UsageLog } from "../types";
+import type { GatewayApi, UsageLog } from "../types";
 import { Card } from "./Card";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
@@ -119,7 +119,7 @@ export function LogsView({ admin = false }: { admin?: boolean }) {
 
   return (
     <Card flush title={t("logs.title")} description={t("logs.hint")} actions={filters}>
-      <Table minWidth={admin ? 1320 : 940}>
+      <Table minWidth={admin ? 1440 : 1060}>
         <THead>
           <Th>{t("logs.time")}</Th>
           {admin && <Th>{t("logs.user")}</Th>}
@@ -177,6 +177,27 @@ export function LogsView({ admin = false }: { admin?: boolean }) {
   );
 }
 
+const API_LABEL: Record<GatewayApi, { label: MessageKey; path: string }> = {
+  chat: { label: "logs.apiChat", path: "/v1/chat/completions" },
+  messages: { label: "logs.apiMessages", path: "/v1/messages" },
+  embeddings: { label: "logs.apiEmbeddings", path: "/v1/embeddings" },
+};
+
+/** Prompt tokens, plus "(900 cached)" when part of the prompt was read from / written to the cache. */
+function TokensIn({ log: l }: { log: UsageLog }) {
+  const t = useT();
+  const read = l.cache_read_tokens ?? 0;
+  const write = l.cache_write_tokens ?? 0;
+  if (read <= 0 && write <= 0) return <>{formatInt(l.prompt_tokens)}</>;
+  const title = [t("logs.cacheReadTokens", { n: read }), t("logs.cacheWriteTokens", { n: write })].join("\n");
+  return (
+    <span className="whitespace-nowrap" title={title}>
+      {formatInt(l.prompt_tokens)}{" "}
+      <span className="text-xs text-muted">({read > 0 ? t("logs.cachedShort", { n: read }) : t("logs.cacheWriteShort", { n: write })})</span>
+    </span>
+  );
+}
+
 function LogRow({ log: l, admin, cols, open, onToggle }: { log: UsageLog; admin: boolean; cols: number; open: boolean; onToggle: () => void }) {
   const t = useT();
   const failed = l.status === "error";
@@ -188,6 +209,11 @@ function LogRow({ log: l, admin, cols, open, onToggle }: { log: UsageLog; admin:
         <Td>
           <div className="flex items-center gap-1.5">
             <span className="font-mono text-xs whitespace-nowrap">{l.model}</span>
+            {l.api && API_LABEL[l.api] && (
+              <Badge tone={l.api === "chat" ? "neutral" : "accent"} title={t("logs.apiHint", { path: API_LABEL[l.api].path })}>
+                {t(API_LABEL[l.api].label)}
+              </Badge>
+            )}
             {l.stream && <Badge>{t("logs.stream")}</Badge>}
           </div>
         </Td>
@@ -200,7 +226,9 @@ function LogRow({ log: l, admin, cols, open, onToggle }: { log: UsageLog; admin:
         <Td className="max-w-40 truncate text-muted" title={l.api_key_name}>
           {l.api_key_name || "—"}
         </Td>
-        <Td align="right">{formatInt(l.prompt_tokens)}</Td>
+        <Td align="right">
+          <TokensIn log={l} />
+        </Td>
         <Td align="right">{formatInt(l.completion_tokens)}</Td>
         <Td align="right" className="font-medium whitespace-nowrap">
           {formatUSD(l.cost)}

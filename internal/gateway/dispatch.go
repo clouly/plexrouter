@@ -180,7 +180,7 @@ func (g *Gateway) dispatch(ctx context.Context, c *caller, cands []candidate, st
 			if errors.Is(err, provider.ErrUnsupported) {
 				break // this provider type can't do it; try the next endpoint
 			}
-			g.record(c, rt, 0, 0, 0, stream, err)
+			g.record(c, rt, store.TokenUsage{}, 0, stream, err)
 			if ctx.Err() != nil {
 				return lastErr
 			}

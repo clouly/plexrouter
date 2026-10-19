@@ -1,8 +1,10 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -27,8 +29,13 @@ func (a *anthropic) header() http.Header {
 	return h
 }
 
-func (a *anthropic) body(req *ChatRequest, upstreamModel string, stream bool) Object {
-	var system []string
+// jsonToolName is the forced tool used to get JSON-schema output from Claude.
+const jsonToolName = "json_response"
+
+// body builds a Messages API request. jsonMode reports that the answer will
+// arrive as the input of the forced jsonToolName tool call.
+func (a *anthropic) body(req *ChatRequest, upstreamModel string, stream bool) (body Object, jsonMode bool) {
+	var system []any // text blocks; cache_control is kept per block
 	type turn struct {
 		role   string
 		blocks []any
@@ -49,8 +56,10 @@ func (a *anthropic) body(req *ChatRequest, upstreamModel string, stream bool) Ob
 	for _, m := range req.Messages {
 		switch m.Role {
 		case "system", "developer":
-			if t := m.Text(); t != "" {
-				system = append(system, t)
+			for _, p := range m.Parts() {
+				if p.Type == "text" && p.Text != "" {
+					system = append(system, textBlock(p))
+				}
 			}
 		case "assistant":
 			var blocks []any
@@ -80,9 +89,9 @@ func (a *anthropic) body(req *ChatRequest, upstreamModel string, stream bool) Ob
 	if maxTokens <= 0 {
 		maxTokens = anthropicDefaultMaxTokens
 	}
-	body := Object{"model": upstreamModel, "messages": messages, "max_tokens": maxTokens}
+	body = Object{"model": upstreamModel, "messages": messages, "max_tokens": maxTokens}
 	if len(system) > 0 {
-		body["system"] = strings.Join(system, "\n\n")
+		body["system"] = system
 	}
 	if stream {
 		body["stream"] = true
@@ -116,7 +125,56 @@ func (a *anthropic) body(req *ChatRequest, upstreamModel string, stream bool) Ob
 	if req.User != "" {
 		body["metadata"] = Object{"user_id": req.User}
 	}
-	return body
+
+	// Structured output: Claude reliably follows a schema when it must "call"
+	// a tool with it; the tool input is returned as the message content.
+	if rf := req.ResponseFormat; rf != nil && len(req.Tools) == 0 {
+		switch rf.Type {
+		case "json_schema":
+			schema := json.RawMessage(`{"type":"object"}`)
+			if rf.JSONSchema != nil && len(rf.JSONSchema.Schema) > 0 {
+				schema = rf.JSONSchema.Schema
+			}
+			body["tools"] = []any{Object{"name": jsonToolName, "description": "Return the answer as JSON matching this schema.", "input_schema": schema}}
+			body["tool_choice"] = Object{"type": "tool", "name": jsonToolName}
+			jsonMode = true
+		case "json_object":
+			system = append(system, Object{"type": "text", "text": "Respond only with a single valid JSON object, without any other text."})
+			body["system"] = system
+		}
+	}
+
+	// Extended thinking. Anthropic requires earlier thinking blocks to be sent
+	// back in tool-use conversations, which OpenAI-format clients don't keep,
+	// and forbids it with a forced tool; skip it in those cases.
+	_, forced := body["tool_choice"].(Object)
+	if tc, ok := body["tool_choice"].(Object); ok && (tc["type"] == "auto" || tc["type"] == "none") {
+		forced = false
+	}
+	if effort, explicit := req.ReasoningRequest(); effort != "" && !forced && !req.HasToolHistory() {
+		budget := thinkingBudget(effort, explicit)
+		if req.MaxOutputTokens() <= 0 {
+			body["max_tokens"] = budget + anthropicDefaultMaxTokens
+		} else if budget >= maxTokens {
+			budget = maxTokens - 1
+		}
+		if budget >= 1024 {
+			body["thinking"] = Object{"type": "enabled", "budget_tokens": budget}
+			// Sampling parameters can't be combined with thinking.
+			delete(body, "temperature")
+			delete(body, "top_p")
+			delete(body, "top_k")
+		}
+	}
+	return body, jsonMode
+}
+
+func textBlock(p ContentPart) Object {
+	b := Object{"type": "text", "text": p.Text}
+	if len(p.CacheControl) > 0 && string(p.CacheControl) != "null" {
+		b["cache_control"] = p.CacheControl
+	}
+	return b
 }
 
 func anthropicContent(parts []ContentPart) []any {
@@ -125,17 +183,22 @@ func anthropicContent(parts []ContentPart) []any {
 		switch p.Type {
 		case "text":
 			if p.Text != "" {
-				blocks = append(blocks, Object{"type": "text", "text": p.Text})
+				blocks = append(blocks, textBlock(p))
 			}
 		case "image_url":
 			if p.ImageURL == nil {
 				continue
 			}
+			var img Object
 			if mime, data, ok := parseDataURL(p.ImageURL.URL); ok {
-				blocks = append(blocks, Object{"type": "image", "source": Object{"type": "base64", "media_type": mime, "data": data}})
+				img = Object{"type": "image", "source": Object{"type": "base64", "media_type": mime, "data": data}}
 			} else {
-				blocks = append(blocks, Object{"type": "image", "source": Object{"type": "url", "url": p.ImageURL.URL}})
+				img = Object{"type": "image", "source": Object{"type": "url", "url": p.ImageURL.URL}}
 			}
+			if len(p.CacheControl) > 0 && string(p.CacheControl) != "null" {
+				img["cache_control"] = p.CacheControl
+			}
+			blocks = append(blocks, img)
 		}
 	}
 	return blocks
@@ -204,8 +267,9 @@ type anthropicUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
-func (u anthropicUsage) prompt() int {
-	return u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+func (u anthropicUsage) usage() Usage {
+	return Usage{PromptTokens: u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens,
+		CompletionTokens: u.OutputTokens, CacheReadTokens: u.CacheReadInputTokens, CacheWriteTokens: u.CacheCreationInputTokens}
 }
 
 type anthropicBlock struct {
@@ -218,7 +282,8 @@ type anthropicBlock struct {
 }
 
 func (a *anthropic) Chat(ctx context.Context, req *ChatRequest, upstreamModel string) (Object, error) {
-	resp, err := a.do(ctx, http.MethodPost, a.url("/messages"), a.body(req, upstreamModel, false), a.header())
+	body, jsonMode := a.body(req, upstreamModel, false)
+	resp, err := a.do(ctx, http.MethodPost, a.url("/messages"), body, a.header())
 	if err != nil {
 		return nil, err
 	}
@@ -245,6 +310,10 @@ func (a *anthropic) Chat(ctx context.Context, req *ChatRequest, upstreamModel st
 			if args == "" {
 				args = "{}"
 			}
+			if jsonMode && b.Name == jsonToolName {
+				text.WriteString(args)
+				continue
+			}
 			toolCalls = append(toolCalls, Object{"id": b.ID, "type": "function", "function": Object{"name": b.Name, "arguments": args}})
 		}
 	}
@@ -255,16 +324,21 @@ func (a *anthropic) Chat(ctx context.Context, req *ChatRequest, upstreamModel st
 	if len(toolCalls) > 0 {
 		message["tool_calls"] = toolCalls
 	}
-	return completion(msg.ID, upstreamModel, unixNow(), message, anthropicFinish(msg.StopReason),
-		usageObject(msg.Usage.prompt(), msg.Usage.OutputTokens)), nil
+	finish := anthropicFinish(msg.StopReason)
+	if jsonMode && finish == "tool_calls" {
+		finish = "stop"
+	}
+	return completion(msg.ID, upstreamModel, unixNow(), message, finish, usageObject(msg.Usage.usage())), nil
 }
 
 func (a *anthropic) ChatStream(ctx context.Context, req *ChatRequest, upstreamModel string) (Stream, error) {
-	resp, err := a.do(ctx, http.MethodPost, a.url("/messages"), a.body(req, upstreamModel, true), a.header())
+	body, jsonMode := a.body(req, upstreamModel, true)
+	resp, err := a.do(ctx, http.MethodPost, a.url("/messages"), body, a.header())
 	if err != nil {
 		return nil, err
 	}
-	return &anthropicStream{sse: newSSEReader(resp.Body), model: upstreamModel, created: unixNow(), toolIndex: map[int]int{}}, nil
+	return &anthropicStream{sse: newSSEReader(resp.Body), model: upstreamModel, created: unixNow(), toolIndex: map[int]int{},
+		jsonMode: jsonMode, jsonBlock: -1}, nil
 }
 
 type anthropicStream struct {
@@ -274,6 +348,8 @@ type anthropicStream struct {
 	created   int64
 	usage     anthropicUsage
 	toolIndex map[int]int // content block index -> tool_calls index
+	jsonMode  bool        // answer arrives as the forced JSON tool's input
+	jsonBlock int         // content block index of that tool call, -1 if none
 	finished  bool
 	done      bool
 }
@@ -316,6 +392,10 @@ func (s *anthropicStream) Next() (Object, error) {
 			s.usage = ev.Message.Usage
 			return chunk(s.id, s.model, s.created, Object{"role": "assistant", "content": ""}, nil), nil
 		case "content_block_start":
+			if ev.ContentBlock.Type == "tool_use" && s.jsonMode && ev.ContentBlock.Name == jsonToolName {
+				s.jsonBlock = ev.Index
+				continue
+			}
 			if ev.ContentBlock.Type == "tool_use" {
 				i := len(s.toolIndex)
 				s.toolIndex[ev.Index] = i
@@ -331,6 +411,9 @@ func (s *anthropicStream) Next() (Object, error) {
 			case "thinking_delta":
 				return chunk(s.id, s.model, s.created, Object{"reasoning": ev.Delta.Thinking}, nil), nil
 			case "input_json_delta":
+				if ev.Index == s.jsonBlock {
+					return chunk(s.id, s.model, s.created, Object{"content": ev.Delta.PartialJSON}, nil), nil
+				}
 				return chunk(s.id, s.model, s.created, Object{"tool_calls": []any{Object{
 					"index": s.toolIndex[ev.Index], "function": Object{"arguments": ev.Delta.PartialJSON},
 				}}}, nil), nil
@@ -343,13 +426,17 @@ func (s *anthropicStream) Next() (Object, error) {
 				}
 			}
 			if ev.Delta.StopReason != "" {
-				return chunk(s.id, s.model, s.created, Object{}, anthropicFinish(ev.Delta.StopReason)), nil
+				finish := anthropicFinish(ev.Delta.StopReason)
+				if s.jsonMode && finish == "tool_calls" {
+					finish = "stop"
+				}
+				return chunk(s.id, s.model, s.created, Object{}, finish), nil
 			}
 		case "message_stop":
 			s.finished, s.done = true, true
 			c := chunk(s.id, s.model, s.created, Object{}, nil)
 			c["choices"] = []any{}
-			c["usage"] = usageObject(s.usage.prompt(), s.usage.OutputTokens)
+			c["usage"] = usageObject(s.usage.usage())
 			return c, nil
 		case "error":
 			return nil, &Error{Status: http.StatusBadGateway, Message: errorMessage(data)}
@@ -379,4 +466,79 @@ func (a *anthropic) ListModels(ctx context.Context) ([]string, error) {
 		}
 	}
 	return ids, nil
+}
+
+// MessagesProvider is implemented by adapters that speak the Anthropic
+// Messages API natively, so /v1/messages can be passed through unchanged.
+type MessagesProvider interface {
+	// Messages forwards a Messages request body and returns the raw 2xx
+	// response (JSON, or an SSE stream when the body asks to stream).
+	Messages(ctx context.Context, body []byte, upstreamModel string, in http.Header) (*http.Response, error)
+	// CountTokens forwards a count_tokens request.
+	CountTokens(ctx context.Context, body Object, upstreamModel string, in http.Header) (Object, error)
+}
+
+// forwardHeader adds the client's anthropic-* headers (API version, beta
+// flags, and whatever later capabilities add), which must reach the API
+// unchanged. Credentials stay the provider's own.
+func (a *anthropic) forwardHeader(in http.Header) http.Header {
+	h := a.header()
+	for k, v := range in {
+		if strings.HasPrefix(strings.ToLower(k), "anthropic-") {
+			h[k] = v
+		}
+	}
+	return h
+}
+
+// SpliceModel replaces the top-level "model" string of a JSON object without
+// re-encoding anything else, so a request reaches the API byte-for-byte
+// (prompt caching and thinking-signature checks depend on unchanged content).
+func SpliceModel(raw []byte, model string) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, fmt.Errorf("request body must be a JSON object")
+	}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		afterKey := int(dec.InputOffset())
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+		if key, _ := t.(string); key != "model" {
+			continue
+		}
+		end := int(dec.InputOffset())
+		start := afterKey + bytes.Index(raw[afterKey:end], v)
+		enc, _ := json.Marshal(model)
+		out := make([]byte, 0, len(raw)+len(enc))
+		out = append(append(append(out, raw[:start]...), enc...), raw[start+len(v):]...)
+		return out, nil
+	}
+	return nil, fmt.Errorf("model: field required")
+}
+
+func withModel(body Object, model string) Object {
+	out := make(Object, len(body))
+	for k, v := range body {
+		out[k] = v
+	}
+	out["model"] = model
+	return out
+}
+
+func (a *anthropic) Messages(ctx context.Context, body []byte, upstreamModel string, in http.Header) (*http.Response, error) {
+	b, err := SpliceModel(body, upstreamModel)
+	if err != nil {
+		return nil, &Error{Status: http.StatusBadRequest, Message: err.Error()}
+	}
+	return a.doRaw(ctx, http.MethodPost, a.url("/messages"), b, a.forwardHeader(in))
+}
+
+func (a *anthropic) CountTokens(ctx context.Context, body Object, upstreamModel string, in http.Header) (Object, error) {
+	return a.doJSON(ctx, http.MethodPost, a.url("/messages/count_tokens"), withModel(body, upstreamModel), a.forwardHeader(in))
 }

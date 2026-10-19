@@ -43,6 +43,8 @@ type PublicModel = {
   context_length: number;
   input_price: number;       // USD / 1M prompt tokens
   output_price: number;      // USD / 1M completion tokens
+  cache_read_price: number | null;  // USD / 1M cached prompt tokens read; null = charged as input
+  cache_write_price: number | null; // USD / 1M prompt tokens written to cache; null = charged as input
   providers: number;         // how many upstream endpoints serve it
 };
 
@@ -51,7 +53,9 @@ type UsageLog = {
   model: string;             // slug requested
   provider: string;          // provider name that served it ("" if none)
   api_key_name: string;
-  prompt_tokens: number; completion_tokens: number;
+  prompt_tokens: number; completion_tokens: number; // prompt_tokens includes cached tokens
+  cache_read_tokens: number; cache_write_tokens: number;
+  api: "chat" | "messages" | "embeddings"; // which gateway endpoint was called
   cost: number;              // USD
   latency_ms: number;
   status: "success" | "error";
@@ -115,12 +119,15 @@ type Endpoint = {
   enabled: boolean;
   input_cost: number | null; // USD / 1M tokens the operator pays this provider; null = unknown
   output_cost: number | null;
+  cache_read_cost: number | null;  // null = same as input_cost
+  cache_write_cost: number | null; // null = same as input_cost
   circuit_open_until: string | null; // set while the endpoint is skipped after repeated failures
 };
 
 type AdminModel = {
   id: number; slug: string; name: string; description: string;
   context_length: number; input_price: number; output_price: number;
+  cache_read_price: number | null; cache_write_price: number | null; // null = charged as input
   enabled: boolean; created_at: string;
   endpoints: Endpoint[];
 };
@@ -138,6 +145,7 @@ type CatalogModel = {
   id: string;                // e.g. "openai/gpt-4o" — becomes our slug
   name: string; description: string; context_length: number;
   input_price: number; output_price: number; // reference USD / 1M tokens
+  cache_read_price: number | null; cache_write_price: number | null;
   upstream_match: string | null; // with ?provider_id: the provider's model that matches, else null
   exists: boolean;           // a model with this slug already exists here
 };
@@ -217,7 +225,7 @@ The console should show a localized message for these `error.code` values and fa
 | POST | `/api/admin/providers/{id}/test` | | `{ ok: boolean, latency_ms: number, message: string }` |
 | GET | `/api/admin/providers/{id}/upstream-models` | | `{ data: { id: string }[] }` — models the provider reports |
 | GET | `/api/admin/models` | | `{ data: AdminModel[] }` (all, incl. disabled) |
-| POST | `/api/admin/models` | `{ slug, name, description?, context_length?, input_price, output_price, enabled?, endpoints: {provider_id, upstream_model, priority?, enabled?, input_cost?: number \| null, output_cost?: number \| null}[] }` | `{ model: AdminModel }` |
+| POST | `/api/admin/models` | `{ slug, name, description?, context_length?, input_price, output_price, cache_read_price?: number \| null, cache_write_price?: number \| null, enabled?, endpoints: {provider_id, upstream_model, priority?, enabled?, input_cost?, output_cost?, cache_read_cost?, cache_write_cost? /* number \| null */}[] }` | `{ model: AdminModel }` |
 | PATCH | `/api/admin/models/{id}` | same fields, all optional; if `endpoints` is present it **replaces** the list | `{ model: AdminModel }` |
 | DELETE | `/api/admin/models/{id}` | | `{ ok: true }` |
 | POST | `/api/admin/models/import` | `{ provider_id, upstream_models: string[], slug_prefix: string }` | `{ created: number, skipped: number }` — creates disabled models `slug_prefix/upstream` with price 0; existing slugs get the endpoint added instead |
@@ -236,6 +244,12 @@ The console should show a localized message for these `error.code` values and fa
 - Base URL: `<origin>/v1` (also `<origin>/api/v1`). Auth: `Authorization: Bearer sk-plex-...`.
 - `POST /v1/chat/completions` — OpenAI Chat Completions format, `stream: true` supported (SSE).
   Extra fields: `models: string[]` (fallback list tried in order if the primary model fails), and the response `usage` includes `cost` (USD).
-- `GET /v1/models` — OpenAI-style list: `{ object: "list", data: [{ id, object: "model", created, owned_by, name, context_length, pricing: { prompt: "<USD per token>", completion: "<USD per token>" } }] }`.
+- `GET /v1/models` — OpenAI-style list: `{ object: "list", data: [{ id, object: "model", created, owned_by, name, context_length, pricing: { prompt: "<USD per token>", completion: "<USD per token>", input_cache_read?: "…", input_cache_write?: "…" } }] }`.
+- `POST /v1/messages` — **Anthropic Messages API** (for Claude Code and Anthropic SDKs). Auth with `x-api-key: sk-plex-…` or `Authorization: Bearer sk-plex-…`. Works with any provider: Anthropic upstreams get the request as-is (incl. `anthropic-beta`, thinking, `cache_control`); other providers are translated to and from OpenAI format. Streaming supported. `POST /v1/messages/count_tokens` is also served (exact for Anthropic upstreams, estimated otherwise).
+  Claude Code: `ANTHROPIC_BASE_URL=<origin>` and `ANTHROPIC_AUTH_TOKEN=sk-plex-…` (Claude Code appends `/v1/messages`), optionally `ANTHROPIC_MODEL=<model id>`.
+- **Model names**: besides the exact id (`anthropic/claude-sonnet-4.5`), requests may use the provider's own name (`claude-sonnet-4-5-20250929`, `gpt-4o`): the gateway resolves it to the matching model, ignoring the vendor prefix, dots vs dashes and date suffixes.
+- **Reasoning** (chat completions): `reasoning_effort: "minimal"|"low"|"medium"|"high"` (OpenAI style) or `reasoning: { effort?, max_tokens?, exclude? }` (OpenRouter style). Mapped to Anthropic `thinking.budget_tokens` and Gemini `thinkingConfig`. Reasoning text is returned in `message.reasoning` / `delta.reasoning` (omitted with `exclude: true`).
+- **Prompt caching**: put `cache_control: {"type": "ephemeral"}` on a content part (system or user message) to mark a cache breakpoint for Anthropic; OpenAI and Gemini cache automatically. `usage.prompt_tokens_details.cached_tokens` and `usage.prompt_tokens_details.cache_write_tokens` report cache use, and cached tokens are billed at the model's cache prices.
+- **Structured outputs**: `response_format: {type: "json_schema", json_schema: {name, schema}}` works for all providers (Anthropic via a forced tool call; the JSON is returned as message content).
 - Limits: `429 rate_limited` (with a `Retry-After` header, seconds) when the key's or the user's requests-per-minute limit is hit; `403 model_not_allowed` when the key's `allowed_models` excludes the requested model.
 - `GET /v1/key` — info about the key in use: `{ data: { name, usage, limit, balance } }`.

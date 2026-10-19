@@ -72,8 +72,10 @@ func New(cfg Config, client *http.Client) (Adapter, error) {
 	}
 	h := httpClient{client: client, base: base, key: cfg.APIKey}
 	switch cfg.Type {
-	case TypeOpenAI, TypeOpenAICompatible:
-		return &openAI{h}, nil
+	case TypeOpenAI:
+		return &openAI{httpClient: h, official: true}, nil
+	case TypeOpenAICompatible:
+		return &openAI{httpClient: h}, nil
 	case TypeAnthropic:
 		return &anthropic{h}, nil
 	case TypeGemini:
@@ -89,6 +91,8 @@ type Error struct {
 	Message    string
 	Code       string        // upstream error code/type if any, e.g. "insufficient_quota"
 	RetryAfter time.Duration // from a Retry-After header, if any
+	Body       []byte        // raw upstream error body, for forwarding unmodified
+	Header     http.Header   // upstream response headers
 }
 
 func (e *Error) Error() string {
@@ -123,12 +127,20 @@ type httpClient struct {
 // do sends a request and returns the response if the status is 2xx; otherwise
 // it reads the body into an *Error.
 func (h httpClient) do(ctx context.Context, method, url string, body any, header http.Header) (*http.Response, error) {
-	var rd io.Reader
+	var b []byte
 	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
+		var err error
+		if b, err = json.Marshal(body); err != nil {
 			return nil, err
 		}
+	}
+	return h.doRaw(ctx, method, url, b, header)
+}
+
+// doRaw is do with an already encoded JSON body (nil for none).
+func (h httpClient) doRaw(ctx context.Context, method, url string, b []byte, header http.Header) (*http.Response, error) {
+	var rd io.Reader
+	if b != nil {
 		rd = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, rd)
@@ -138,7 +150,7 @@ func (h httpClient) do(ctx context.Context, method, url string, body any, header
 	for k, v := range header {
 		req.Header[k] = v
 	}
-	if body != nil {
+	if b != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := h.client.Do(req)
@@ -151,7 +163,7 @@ func (h httpClient) do(ctx context.Context, method, url string, body any, header
 	if resp.StatusCode/100 != 2 {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		e := &Error{Status: resp.StatusCode, Message: errorMessage(b), Code: errorCode(b)}
+		e := &Error{Status: resp.StatusCode, Message: errorMessage(b), Code: errorCode(b), Body: b, Header: resp.Header}
 		if secs, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && secs > 0 {
 			e.RetryAfter = time.Duration(secs) * time.Second
 		}

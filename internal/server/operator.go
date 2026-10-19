@@ -433,14 +433,16 @@ func (s *Server) alerts(ctx context.Context) ([]alertJSON, error) {
 func (s *Server) SetCatalogURL(url string) { s.catalog.URL = url }
 
 type catalogModelJSON struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	Description   string  `json:"description"`
-	ContextLength int     `json:"context_length"`
-	InputPrice    float64 `json:"input_price"`
-	OutputPrice   float64 `json:"output_price"`
-	UpstreamMatch *string `json:"upstream_match"`
-	Exists        bool    `json:"exists"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	ContextLength int      `json:"context_length"`
+	InputPrice    float64  `json:"input_price"`
+	OutputPrice   float64  `json:"output_price"`
+	CacheRead     *float64 `json:"cache_read_price"`
+	CacheWrite    *float64 `json:"cache_write_price"`
+	UpstreamMatch *string  `json:"upstream_match"`
+	Exists        bool     `json:"exists"`
 }
 
 func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
@@ -475,7 +477,8 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 	out := make([]catalogModelJSON, 0, len(models))
 	for _, m := range models {
 		j := catalogModelJSON{ID: m.ID, Name: m.Name, Description: m.Description, ContextLength: m.ContextLength,
-			InputPrice: m.InputPrice, OutputPrice: m.OutputPrice, Exists: have[m.ID]}
+			InputPrice: m.InputPrice, OutputPrice: m.OutputPrice, CacheRead: m.CacheReadPrice, CacheWrite: m.CacheWritePrice,
+			Exists: have[m.ID]}
 		if upstream != nil {
 			if match := catalog.Match(m.ID, upstream); match != "" {
 				j.UpstreamMatch = &match
@@ -489,6 +492,14 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 // markup applies a percentage to a reference price, rounded to 1e-6 USD/1M.
 func markup(price, percent float64) float64 {
 	return math.Round(price*(1+percent/100)*1e6) / 1e6
+}
+
+func markupPtr(price *float64, percent float64) *float64 {
+	if price == nil {
+		return nil
+	}
+	v := markup(*price, percent)
+	return &v
 }
 
 func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
@@ -535,13 +546,15 @@ func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
 		}
 		inCost, outCost := m.InputPrice, m.OutputPrice
 		ep := store.Endpoint{ProviderID: in.ProviderID, UpstreamModel: upstream, Enabled: true,
-			InputCost: &inCost, OutputCost: &outCost}
+			InputCost: &inCost, OutputCost: &outCost, CacheReadCost: m.CacheReadPrice, CacheWriteCost: m.CacheWritePrice}
 		sellIn, sellOut := markup(m.InputPrice, in.MarkupPercent), markup(m.OutputPrice, in.MarkupPercent)
+		sellRead, sellWrite := markupPtr(m.CacheReadPrice, in.MarkupPercent), markupPtr(m.CacheWritePrice, in.MarkupPercent)
 
 		existing, err := s.store.GetModelBySlug(ctx, m.ID)
 		if errors.Is(err, store.ErrNotFound) {
 			if _, err := s.store.CreateModel(ctx, store.Model{Slug: m.ID, Name: m.Name, Description: m.Description,
-				ContextLength: m.ContextLength, InputPrice: sellIn, OutputPrice: sellOut, Enabled: in.Enable,
+				ContextLength: m.ContextLength, InputPrice: sellIn, OutputPrice: sellOut,
+				CacheReadPrice: sellRead, CacheWritePrice: sellWrite, Enabled: in.Enable,
 				Endpoints: []store.Endpoint{ep}}); err != nil {
 				s.fail(w, r, err)
 				return
@@ -567,7 +580,7 @@ func (s *Server) handleCatalogImport(w http.ResponseWriter, r *http.Request) {
 		}
 		if in.UpdateExisting {
 			upd := store.ModelUpdate{Name: &m.Name, Description: &m.Description, ContextLength: &m.ContextLength,
-				InputPrice: &sellIn, OutputPrice: &sellOut}
+				InputPrice: &sellIn, OutputPrice: &sellOut, CacheReadPrice: &sellRead, CacheWritePrice: &sellWrite}
 			if in.Enable {
 				upd.Enabled = &in.Enable
 			}

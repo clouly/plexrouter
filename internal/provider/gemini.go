@@ -45,7 +45,7 @@ func newToolCallID(signature string) string {
 	return id
 }
 
-func (g *gemini) body(req *ChatRequest) Object {
+func (g *gemini) body(req *ChatRequest, upstreamModel string) Object {
 	var system []string
 	toolNames := map[string]string{} // tool call id -> function name
 	type turn struct {
@@ -143,6 +143,19 @@ func (g *gemini) body(req *ChatRequest) Object {
 			}
 		}
 	}
+	if effort, explicit := req.ReasoningRequest(); effort != "" {
+		tc := Object{"includeThoughts": true}
+		if strings.Contains(upstreamModel, "gemini-3") {
+			// Gemini 3 takes a level instead of a token budget.
+			tc["thinkingLevel"] = "high"
+			if (effort == "minimal" || effort == "low") && explicit == 0 {
+				tc["thinkingLevel"] = "low"
+			}
+		} else {
+			tc["thinkingBudget"] = thinkingBudget(effort, explicit)
+		}
+		cfg["thinkingConfig"] = tc
+	}
 	if len(cfg) > 0 {
 		body["generationConfig"] = cfg
 	}
@@ -236,15 +249,17 @@ type geminiResponse struct {
 		PromptTokenCount     int `json:"promptTokenCount"`
 		CandidatesTokenCount int `json:"candidatesTokenCount"`
 		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+		CachedTokenCount     int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata"`
 }
 
-func (r *geminiResponse) usage() (prompt, completion int, ok bool) {
+func (r *geminiResponse) usage() (Usage, bool) {
 	if r.UsageMetadata == nil {
-		return 0, 0, false
+		return Usage{}, false
 	}
 	u := r.UsageMetadata
-	return u.PromptTokenCount, u.CandidatesTokenCount + u.ThoughtsTokenCount, true
+	return Usage{PromptTokens: u.PromptTokenCount, CompletionTokens: u.CandidatesTokenCount + u.ThoughtsTokenCount,
+		CacheReadTokens: u.CachedTokenCount}, true
 }
 
 // delta converts the first candidate into OpenAI message fields. toolIndex is
@@ -303,7 +318,7 @@ func (r *geminiResponse) delta(toolIndex int, streaming bool) (msg Object, finis
 }
 
 func (g *gemini) Chat(ctx context.Context, req *ChatRequest, upstreamModel string) (Object, error) {
-	resp, err := g.do(ctx, http.MethodPost, g.url(upstreamModel, "generateContent"), g.body(req), g.header())
+	resp, err := g.do(ctx, http.MethodPost, g.url(upstreamModel, "generateContent"), g.body(req, upstreamModel), g.header())
 	if err != nil {
 		return nil, err
 	}
@@ -317,12 +332,12 @@ func (g *gemini) Chat(ctx context.Context, req *ChatRequest, upstreamModel strin
 	if calls > 0 && finish == "stop" {
 		finish = "tool_calls"
 	}
-	prompt, completionTokens, _ := r.usage()
-	return completion(r.ResponseID, upstreamModel, unixNow(), msg, finish, usageObject(prompt, completionTokens)), nil
+	u, _ := r.usage()
+	return completion(r.ResponseID, upstreamModel, unixNow(), msg, finish, usageObject(u)), nil
 }
 
 func (g *gemini) ChatStream(ctx context.Context, req *ChatRequest, upstreamModel string) (Stream, error) {
-	resp, err := g.do(ctx, http.MethodPost, g.url(upstreamModel, "streamGenerateContent")+"?alt=sse", g.body(req), g.header())
+	resp, err := g.do(ctx, http.MethodPost, g.url(upstreamModel, "streamGenerateContent")+"?alt=sse", g.body(req, upstreamModel), g.header())
 	if err != nil {
 		return nil, err
 	}
@@ -330,13 +345,13 @@ func (g *gemini) ChatStream(ctx context.Context, req *ChatRequest, upstreamModel
 }
 
 type geminiStream struct {
-	sse                *sseReader
-	model, id          string
-	created            int64
-	started            bool
-	toolCalls          int
-	prompt, completion int
-	sawUsage, done     bool
+	sse            *sseReader
+	model, id      string
+	created        int64
+	started        bool
+	toolCalls      int
+	usage          Usage
+	sawUsage, done bool
 }
 
 func (s *geminiStream) Next() (Object, error) {
@@ -350,7 +365,7 @@ func (s *geminiStream) Next() (Object, error) {
 			c := chunk(s.id, s.model, s.created, Object{}, nil)
 			c["choices"] = []any{}
 			if s.sawUsage {
-				c["usage"] = usageObject(s.prompt, s.completion)
+				c["usage"] = usageObject(s.usage)
 			}
 			return c, nil
 		}
@@ -361,8 +376,8 @@ func (s *geminiStream) Next() (Object, error) {
 		if err := json.Unmarshal(data, &r); err != nil {
 			return nil, &Error{Status: http.StatusBadGateway, Message: "invalid stream event: " + err.Error()}
 		}
-		if p, c, ok := r.usage(); ok {
-			s.prompt, s.completion, s.sawUsage = p, c, true
+		if u, ok := r.usage(); ok {
+			s.usage, s.sawUsage = u, true
 		}
 		delta, finish, calls := r.delta(s.toolCalls, true)
 		s.toolCalls += calls

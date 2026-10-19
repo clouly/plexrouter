@@ -9,7 +9,8 @@
 ## 功能
 
 - **一个接口调用所有模型** —— OpenAI 格式的 `POST /v1/chat/completions`（支持流式、工具调用、图片、JSON 模式）、`/v1/embeddings`、`/v1/models`。可直接使用官方 OpenAI SDK 及所有兼容 OpenAI 接口的工具。
-- **原生协议适配** —— 自动转换为 Anthropic Messages API 和 Gemini API（含工具调用与流式）；OpenAI 兼容上游直接透传，保留额外字段。
+- **Anthropic Messages API 与 Claude Code** —— `POST /v1/messages` 对 Anthropic 原样透传，对其他供应商自动转换，Claude Code 和 Anthropic SDK 可以使用任意模型。
+- **原生协议适配** —— 自动转换为 Anthropic Messages API 和 Gemini API（含工具调用与流式）；OpenAI 兼容上游直接透传，保留额外字段。推理强度、提示词缓存（`cache_control`）和结构化输出会在不同供应商间自动转换，缓存 token 按缓存价计费。
 - **路由与失败回退** —— 一个模型（如 `openai/gpt-4o`）可以由多个供应商提供，按优先级依次尝试；客户端也可以传 `models: [...]` 回退到其他模型。回退在向客户端发送第一个字节之前完成，对客户端透明。
 - **余额与计费** —— 每个模型按每百万输入/输出 token 定价，每次请求按上游返回的 token 数精确扣费（纳美元精度）。支持 Key 额度上限、兑换码、管理员调账、注册赠送。
 - **为运营者设计** —— 用户完全不接触供应商 Key。每个供应商可配多个上游 Key 轮流使用；被拒绝或额度用完的 Key 自动停用，被限流的 Key 暂时冷却，连续失败的线路由熔断器自动跳过。记录上游成本与收入、生成利润报表，查看供应商健康度和告警，还能从 OpenRouter 模型目录按参考价加价一键导入模型。
@@ -143,8 +144,25 @@ print(resp.choices[0].message.content)
 |---|---|
 | `POST /v1/chat/completions` | 对话补全（OpenAI 格式，支持 `stream: true`）。额外请求字段 `models: string[]` 为回退模型列表。响应中包含 `provider` 和 `usage.cost`（美元）。 |
 | `POST /v1/embeddings` | 向量嵌入（OpenAI 及 OpenAI 兼容供应商）。 |
+| `POST /v1/messages` | Anthropic Messages API（支持流式、工具、思考、缓存），以及 `/v1/messages/count_tokens`。用 `x-api-key` 或 `Authorization: Bearer` 认证。 |
 | `GET /v1/models` | 已启用的模型，含上下文长度和每 token 价格。 |
 | `GET /v1/key` | 当前 Key 的名称、已用额度、额度上限和账户余额。 |
+
+### Claude Code
+
+PlexRouter 提供 Anthropic Messages API，所以 Claude Code 可以使用模型目录里的任意模型：
+
+```bash
+export ANTHROPIC_BASE_URL=https://api.example.com   # 不要带 /v1，Claude Code 会自己加上 /v1/messages
+export ANTHROPIC_AUTH_TOKEN=sk-plex-...
+export ANTHROPIC_MODEL=claude-sonnet-4-5            # 可选；目录中任意模型 ID
+claude
+```
+
+- 发往 Anthropic 供应商的请求**原样透传**（请求体逐字节保留、转发全部 `anthropic-*` 请求头、流式事件和错误体不做修改），提示词缓存、扩展思考、beta 功能和 Claude Code 的错误恢复都能正常工作。发往其他供应商的请求会自动与 OpenAI 格式互相转换。
+- Claude Code 自己的模型名（如 `claude-sonnet-4-5-20250929`）会自动对应到目录中的模型。
+- 使用 Claude Code 不认识的模型（如 `openai/gpt-4o`）时，把 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 设为该模型的上下文长度；使用 auto 模式时再设置 `CLAUDE_CODE_AUTO_MODE_SERVER=0`。
+- 设置 `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` 后，`/model` 里会列出网关上的 Claude 模型。
 
 ## 配置
 
@@ -217,7 +235,6 @@ make test       # Go 测试（使用模拟上游的端到端测试）
 
 ## 路线图
 
-- 原生 Anthropic `/v1/messages` 接口（支持 Claude Code 和 Anthropic SDK）
 - 在线支付（Stripe、支付宝等）
 - 更多供应商：Azure OpenAI、AWS Bedrock、Vertex AI
 - 按权重负载均衡、按价格/延迟选路

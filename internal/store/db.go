@@ -190,6 +190,14 @@ CREATE INDEX request_logs_provider_time ON request_logs(provider_id, created_at)
 ALTER TABLE api_keys ADD COLUMN rate_limit_rpm INTEGER;
 ALTER TABLE api_keys ADD COLUMN allowed_models TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN rate_limit_rpm INTEGER;
+`, `
+ALTER TABLE models ADD COLUMN cache_read_price REAL;
+ALTER TABLE models ADD COLUMN cache_write_price REAL;
+ALTER TABLE model_endpoints ADD COLUMN cache_read_cost REAL;
+ALTER TABLE model_endpoints ADD COLUMN cache_write_cost REAL;
+ALTER TABLE request_logs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE request_logs ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE request_logs ADD COLUMN api TEXT NOT NULL DEFAULT 'chat';
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

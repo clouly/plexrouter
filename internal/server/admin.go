@@ -236,23 +236,27 @@ func (s *Server) handleUpstreamModels(w http.ResponseWriter, r *http.Request) {
 // --- models ---
 
 type endpointInput struct {
-	ProviderID    int64    `json:"provider_id"`
-	UpstreamModel string   `json:"upstream_model"`
-	Priority      int      `json:"priority"`
-	Enabled       *bool    `json:"enabled"`
-	InputCost     *float64 `json:"input_cost"`  // USD / 1M paid upstream; null = unknown
-	OutputCost    *float64 `json:"output_cost"` //
+	ProviderID     int64    `json:"provider_id"`
+	UpstreamModel  string   `json:"upstream_model"`
+	Priority       int      `json:"priority"`
+	Enabled        *bool    `json:"enabled"`
+	InputCost      *float64 `json:"input_cost"`       // USD / 1M paid upstream; null = unknown
+	OutputCost     *float64 `json:"output_cost"`      //
+	CacheReadCost  *float64 `json:"cache_read_cost"`  // null = same as input_cost
+	CacheWriteCost *float64 `json:"cache_write_cost"` //
 }
 
 type modelInput struct {
-	Slug          *string          `json:"slug"`
-	Name          *string          `json:"name"`
-	Description   *string          `json:"description"`
-	ContextLength *int             `json:"context_length"`
-	InputPrice    *float64         `json:"input_price"`
-	OutputPrice   *float64         `json:"output_price"`
-	Enabled       *bool            `json:"enabled"`
-	Endpoints     *[]endpointInput `json:"endpoints"`
+	Slug          *string            `json:"slug"`
+	Name          *string            `json:"name"`
+	Description   *string            `json:"description"`
+	ContextLength *int               `json:"context_length"`
+	InputPrice    *float64           `json:"input_price"`
+	CacheRead     Optional[*float64] `json:"cache_read_price"`
+	CacheWrite    Optional[*float64] `json:"cache_write_price"`
+	OutputPrice   *float64           `json:"output_price"`
+	Enabled       *bool              `json:"enabled"`
+	Endpoints     *[]endpointInput   `json:"endpoints"`
 }
 
 func (in *modelInput) validate(creating bool) string {
@@ -264,7 +268,8 @@ func (in *modelInput) validate(creating bool) string {
 	} else if creating {
 		return "slug is required"
 	}
-	if (in.InputPrice != nil && *in.InputPrice < 0) || (in.OutputPrice != nil && *in.OutputPrice < 0) {
+	negative := func(v *float64) bool { return v != nil && *v < 0 }
+	if negative(in.InputPrice) || negative(in.OutputPrice) || negative(in.CacheRead.Value) || negative(in.CacheWrite.Value) {
 		return "prices must be ≥ 0"
 	}
 	if in.ContextLength != nil && *in.ContextLength < 0 {
@@ -275,7 +280,7 @@ func (in *modelInput) validate(creating bool) string {
 			if e.ProviderID == 0 || strings.TrimSpace(e.UpstreamModel) == "" {
 				return "each endpoint needs provider_id and upstream_model"
 			}
-			if (e.InputCost != nil && *e.InputCost < 0) || (e.OutputCost != nil && *e.OutputCost < 0) {
+			if negative(e.InputCost) || negative(e.OutputCost) || negative(e.CacheReadCost) || negative(e.CacheWriteCost) {
 				return "endpoint costs must be ≥ 0"
 			}
 		}
@@ -291,7 +296,8 @@ func (in *modelInput) endpoints() []store.Endpoint {
 	for _, e := range *in.Endpoints {
 		enabled := e.Enabled == nil || *e.Enabled
 		out = append(out, store.Endpoint{ProviderID: e.ProviderID, UpstreamModel: strings.TrimSpace(e.UpstreamModel),
-			Priority: e.Priority, Enabled: enabled, InputCost: e.InputCost, OutputCost: e.OutputCost})
+			Priority: e.Priority, Enabled: enabled, InputCost: e.InputCost, OutputCost: e.OutputCost,
+			CacheReadCost: e.CacheReadCost, CacheWriteCost: e.CacheWriteCost})
 	}
 	return out
 }
@@ -331,6 +337,7 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 	if in.ContextLength != nil {
 		m.ContextLength = *in.ContextLength
 	}
+	m.CacheReadPrice, m.CacheWritePrice = in.CacheRead.Value, in.CacheWrite.Value
 	if in.InputPrice != nil {
 		m.InputPrice = *in.InputPrice
 	}
@@ -363,6 +370,12 @@ func (s *Server) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 	}
 	upd := store.ModelUpdate{Slug: in.Slug, Name: in.Name, Description: in.Description, ContextLength: in.ContextLength,
 		InputPrice: in.InputPrice, OutputPrice: in.OutputPrice, Enabled: in.Enabled}
+	if in.CacheRead.Set {
+		upd.CacheReadPrice = &in.CacheRead.Value
+	}
+	if in.CacheWrite.Set {
+		upd.CacheWritePrice = &in.CacheWrite.Value
+	}
 	if in.Endpoints != nil {
 		eps := in.endpoints()
 		upd.Endpoints = &eps

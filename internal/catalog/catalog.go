@@ -21,12 +21,14 @@ const (
 )
 
 type Model struct {
-	ID            string // e.g. "openai/gpt-4o"
-	Name          string
-	Description   string
-	ContextLength int
-	InputPrice    float64 // USD per 1M tokens
-	OutputPrice   float64
+	ID              string // e.g. "openai/gpt-4o"
+	Name            string
+	Description     string
+	ContextLength   int
+	InputPrice      float64 // USD per 1M tokens
+	OutputPrice     float64
+	CacheReadPrice  *float64 // nil when the catalog lists none
+	CacheWritePrice *float64
 }
 
 // Catalog caches the model list.
@@ -82,8 +84,10 @@ func (c *Catalog) fetch(ctx context.Context) ([]Model, error) {
 			Description   string `json:"description"`
 			ContextLength int    `json:"context_length"`
 			Pricing       struct {
-				Prompt     string `json:"prompt"`
-				Completion string `json:"completion"`
+				Prompt          string `json:"prompt"`
+				Completion      string `json:"completion"`
+				InputCacheRead  string `json:"input_cache_read"`
+				InputCacheWrite string `json:"input_cache_write"`
 			} `json:"pricing"`
 		} `json:"data"`
 	}
@@ -101,10 +105,21 @@ func (c *Catalog) fetch(ctx context.Context) ([]Model, error) {
 		out = append(out, Model{
 			ID: d.ID, Name: d.Name, Description: d.Description, ContextLength: d.ContextLength,
 			InputPrice: round(in * 1e6), OutputPrice: round(outP * 1e6),
+			CacheReadPrice: perMillion(d.Pricing.InputCacheRead), CacheWritePrice: perMillion(d.Pricing.InputCacheWrite),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// perMillion converts an optional per-token price string to USD per 1M.
+func perMillion(s string) *float64 {
+	v, err := strconv.ParseFloat(s, 64)
+	if s == "" || err != nil || v < 0 {
+		return nil
+	}
+	r := round(v * 1e6)
+	return &r
 }
 
 // round trims float noise from per-token → per-million conversion.

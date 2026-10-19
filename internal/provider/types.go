@@ -32,8 +32,71 @@ type ChatRequest struct {
 	ToolChoice          json.RawMessage `json:"tool_choice"`
 	ResponseFormat      *ResponseFormat `json:"response_format"`
 	User                string          `json:"user"`
+	ReasoningEffort     string          `json:"reasoning_effort"` // OpenAI style
+	Reasoning           *Reasoning      `json:"reasoning"`        // OpenRouter style
 
 	Raw Object `json:"-"`
+}
+
+// Reasoning is OpenRouter's reasoning control.
+type Reasoning struct {
+	Effort    string `json:"effort"`
+	MaxTokens *int   `json:"max_tokens"`
+	Exclude   bool   `json:"exclude"`
+	Enabled   *bool  `json:"enabled"`
+}
+
+// ReasoningRequest returns the requested reasoning effort ("" if none) and
+// an explicit thinking-token budget (0 if none).
+func (r *ChatRequest) ReasoningRequest() (effort string, budget int) {
+	effort = r.ReasoningEffort
+	if o := r.Reasoning; o != nil {
+		if o.Enabled != nil && !*o.Enabled {
+			return "", 0
+		}
+		if o.Effort != "" {
+			effort = o.Effort
+		}
+		if o.MaxTokens != nil && *o.MaxTokens > 0 {
+			budget = *o.MaxTokens
+		}
+		if effort == "" && (budget > 0 || (o.Enabled != nil && *o.Enabled)) {
+			effort = "medium"
+		}
+	}
+	if effort == "none" {
+		return "", 0
+	}
+	return effort, budget
+}
+
+// ExcludeReasoning reports whether the client asked not to receive reasoning text.
+func (r *ChatRequest) ExcludeReasoning() bool { return r.Reasoning != nil && r.Reasoning.Exclude }
+
+// thinkingBudget turns an effort level into a thinking-token budget.
+func thinkingBudget(effort string, explicit int) int {
+	if explicit > 0 {
+		return explicit
+	}
+	switch effort {
+	case "minimal":
+		return 1024
+	case "low":
+		return 2048
+	case "high", "xhigh":
+		return 16384
+	}
+	return 8192 // medium
+}
+
+// HasToolHistory reports whether earlier assistant turns called tools.
+func (r *ChatRequest) HasToolHistory() bool {
+	for _, m := range r.Messages {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type Message struct {
@@ -45,9 +108,10 @@ type Message struct {
 }
 
 type ContentPart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL *struct {
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"` // Anthropic prompt-cache breakpoint
+	ImageURL     *struct {
 		URL    string `json:"url"`
 		Detail string `json:"detail,omitempty"`
 	} `json:"image_url,omitempty"`
@@ -150,10 +214,14 @@ func (m *Message) Text() string {
 	return b.String()
 }
 
-// Usage is token accounting reported by an upstream.
+// Usage is token accounting reported by an upstream. PromptTokens includes
+// tokens read from (CacheReadTokens) and written to (CacheWriteTokens) the
+// provider's prompt cache.
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
+	CacheReadTokens  int
+	CacheWriteTokens int
 }
 
 // UsageOf extracts OpenAI-style usage from a response or chunk, if present.
@@ -162,7 +230,15 @@ func UsageOf(obj Object) *Usage {
 	if !ok {
 		return nil
 	}
-	return &Usage{PromptTokens: toInt(u["prompt_tokens"]), CompletionTokens: toInt(u["completion_tokens"])}
+	out := &Usage{PromptTokens: toInt(u["prompt_tokens"]), CompletionTokens: toInt(u["completion_tokens"])}
+	if d, ok := u["prompt_tokens_details"].(map[string]any); ok {
+		out.CacheReadTokens = toInt(d["cached_tokens"])
+		out.CacheWriteTokens = toInt(d["cache_write_tokens"])
+	}
+	if out.CacheReadTokens == 0 {
+		out.CacheReadTokens = toInt(u["prompt_cache_hit_tokens"]) // DeepSeek
+	}
+	return out
 }
 
 func toInt(v any) int {
@@ -184,6 +260,11 @@ func toInt(v any) int {
 	return 0
 }
 
-func usageObject(prompt, completion int) Object {
-	return Object{"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+func usageObject(u Usage) Object {
+	obj := Object{"prompt_tokens": u.PromptTokens, "completion_tokens": u.CompletionTokens,
+		"total_tokens": u.PromptTokens + u.CompletionTokens}
+	if u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		obj["prompt_tokens_details"] = Object{"cached_tokens": u.CacheReadTokens, "cache_write_tokens": u.CacheWriteTokens}
+	}
+	return obj
 }

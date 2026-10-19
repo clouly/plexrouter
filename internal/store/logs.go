@@ -18,8 +18,11 @@ type RequestLog struct {
 	ProviderName     string
 	ProviderKeyID    int64
 	ProviderKeyName  string
-	PromptTokens     int
+	PromptTokens     int // includes cached tokens
 	CompletionTokens int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	API              string // "chat" | "messages" | "embeddings"
 	Cost             int64  // nano-USD charged to the user
 	UpstreamCost     *int64 // nano-USD paid upstream; nil = endpoint has no cost configured
 	LatencyMS        int64
@@ -36,10 +39,12 @@ func (s *Store) RecordRequest(ctx context.Context, l RequestLog) error {
 		t := now()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO request_logs
 			(user_id, api_key_id, api_key_name, model, provider_id, provider_name, provider_key_id, provider_key_name,
-			 prompt_tokens, completion_tokens, cost, upstream_cost, latency_ms, status, error, stream, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens, api,
+			 cost, upstream_cost, latency_ms, status, error, stream, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			l.UserID, l.APIKeyID, l.APIKeyName, l.Model, l.ProviderID, l.ProviderName, l.ProviderKeyID, l.ProviderKeyName,
-			l.PromptTokens, l.CompletionTokens, l.Cost, l.UpstreamCost, l.LatencyMS, l.Status, l.Error, boolInt(l.Stream), t); err != nil {
+			l.PromptTokens, l.CompletionTokens, l.CacheReadTokens, l.CacheWriteTokens, l.API,
+			l.Cost, l.UpstreamCost, l.LatencyMS, l.Status, l.Error, boolInt(l.Stream), t); err != nil {
 			return err
 		}
 		if l.ProviderKeyID != 0 && l.Status == "success" {
@@ -81,7 +86,8 @@ func (s *Store) ListLogs(ctx context.Context, f LogFilter, p Page) ([]RequestLog
 	limit, offset := p.limitOffset()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT l.id, l.user_id, COALESCE(u.email, ''), l.api_key_id, l.api_key_name, l.model, l.provider_id, l.provider_name,
-		       l.provider_key_id, l.provider_key_name, l.prompt_tokens, l.completion_tokens, l.cost, l.upstream_cost,
+		       l.provider_key_id, l.provider_key_name, l.prompt_tokens, l.completion_tokens,
+		       l.cache_read_tokens, l.cache_write_tokens, l.api, l.cost, l.upstream_cost,
 		       l.latency_ms, l.status, l.error, l.stream, l.created_at
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+where+`
 		ORDER BY l.id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
@@ -95,7 +101,8 @@ func (s *Store) ListLogs(ctx context.Context, f LogFilter, p Page) ([]RequestLog
 		var created int64
 		var upstream sql.NullInt64
 		if err := rows.Scan(&l.ID, &l.UserID, &l.UserEmail, &l.APIKeyID, &l.APIKeyName, &l.Model, &l.ProviderID, &l.ProviderName,
-			&l.ProviderKeyID, &l.ProviderKeyName, &l.PromptTokens, &l.CompletionTokens, &l.Cost, &upstream,
+			&l.ProviderKeyID, &l.ProviderKeyName, &l.PromptTokens, &l.CompletionTokens,
+			&l.CacheReadTokens, &l.CacheWriteTokens, &l.API, &l.Cost, &upstream,
 			&l.LatencyMS, &l.Status, &l.Error, &l.Stream, &created); err != nil {
 			return nil, 0, err
 		}

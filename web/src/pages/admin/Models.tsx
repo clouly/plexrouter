@@ -4,7 +4,7 @@ import { api, errorMessage } from "../../api";
 import { useAuth } from "../../auth";
 import { useT } from "../../i18n";
 import { useAsync, useDocumentTitle } from "../../lib/hooks";
-import { formatContext, formatPercent, formatPrice, formatTime, isFuture, parseNumber } from "../../lib/format";
+import { formatCachePrice, formatContext, formatPercent, formatPrice, formatTime, isFuture, parseNumber } from "../../lib/format";
 import { cx } from "../../lib/cx";
 import type { AdminModel, Endpoint, EndpointInput, ModelInput, Provider } from "../../types";
 import { Card, Notice, PageHeader } from "../../components/Card";
@@ -208,7 +208,14 @@ export function AdminModelsPage() {
                       <Td align="right" className="text-muted">
                         {formatContext(m.context_length)}
                       </Td>
-                      <Td align="right">{formatPrice(m.input_price)}</Td>
+                      <Td align="right">
+                        {formatPrice(m.input_price)}
+                        {(m.cache_read_price != null || m.cache_write_price != null) && (
+                          <div className="text-[11px] whitespace-nowrap text-muted" title={t("adminModels.cachePricesTitle")}>
+                            {t("catalog.cachePrices", { read: formatCachePrice(m.cache_read_price), write: formatCachePrice(m.cache_write_price) })}
+                          </div>
+                        )}
+                      </Td>
                       <Td align="right">
                         <div className="flex items-center justify-end gap-1.5">
                           {unpriced && <Badge tone="warning">{t("adminModels.unpriced")}</Badge>}
@@ -302,6 +309,8 @@ interface EndpointRow {
   enabled: boolean;
   input_cost: string; // "" = unknown
   output_cost: string;
+  cache_read_cost: string; // "" = same as input_cost
+  cache_write_cost: string;
   circuit_open_until: string | null;
 }
 
@@ -313,6 +322,8 @@ interface FormErrors {
   context?: string;
   input?: string;
   output?: string;
+  cacheRead?: string;
+  cacheWrite?: string;
   endpoints?: string;
 }
 
@@ -340,6 +351,9 @@ function ModelDialog({
   const [context, setContext] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [cacheRead, setCacheRead] = useState("");
+  const [cacheWrite, setCacheWrite] = useState("");
+  const [showCache, setShowCache] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const [rows, setRows] = useState<EndpointRow[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -355,6 +369,9 @@ function ModelDialog({
       setContext("");
       setInput("");
       setOutput("");
+      setCacheRead("");
+      setCacheWrite("");
+      setShowCache(false);
       setEnabled(true);
       setRows([]);
     } else {
@@ -364,6 +381,10 @@ function ModelDialog({
       setContext(target.context_length ? String(target.context_length) : "");
       setInput(String(target.input_price));
       setOutput(String(target.output_price));
+      setCacheRead(costText(target.cache_read_price));
+      setCacheWrite(costText(target.cache_write_price));
+      // Show the per-endpoint cache cost fields when any endpoint already has one.
+      setShowCache(target.endpoints.some((e) => e.cache_read_cost != null || e.cache_write_cost != null));
       setEnabled(target.enabled);
       setRows(
         [...target.endpoints]
@@ -376,6 +397,8 @@ function ModelDialog({
             enabled: e.enabled,
             input_cost: costText(e.input_cost),
             output_cost: costText(e.output_cost),
+            cache_read_cost: costText(e.cache_read_cost),
+            cache_write_cost: costText(e.cache_write_cost),
             circuit_open_until: e.circuit_open_until ?? null,
           })),
       );
@@ -394,6 +417,8 @@ function ModelDialog({
         enabled: true,
         input_cost: "",
         output_cost: "",
+        cache_read_cost: "",
+        cache_write_cost: "",
         circuit_open_until: null,
       },
     ]);
@@ -410,18 +435,25 @@ function ModelDialog({
     const op = parseNumber(output);
     if (ip === null || Number.isNaN(ip) || ip < 0) errs.input = t("adminModels.priceInvalid");
     if (op === null || Number.isNaN(op) || op < 0) errs.output = t("adminModels.priceInvalid");
-    const endpoints: EndpointInput[] = [];
     const badCost = (v: number | null) => v !== null && (Number.isNaN(v) || v < 0);
+    const crp = parseNumber(cacheRead);
+    const cwp = parseNumber(cacheWrite);
+    if (badCost(crp)) errs.cacheRead = t("adminModels.cachePriceInvalid");
+    if (badCost(cwp)) errs.cacheWrite = t("adminModels.cachePriceInvalid");
+    const endpoints: EndpointInput[] = [];
     for (const r of rows) {
       const pr = parseNumber(r.priority);
       const ic = parseNumber(r.input_cost);
       const oc = parseNumber(r.output_cost);
+      const crc = parseNumber(r.cache_read_cost);
+      const cwc = parseNumber(r.cache_write_cost);
       if (r.provider_id === "" || !r.upstream_model.trim() || (pr !== null && (Number.isNaN(pr) || !Number.isInteger(pr)))) {
         errs.endpoints = t("adminModels.endpointInvalid");
         break;
       }
-      if (badCost(ic) || badCost(oc)) {
+      if (badCost(ic) || badCost(oc) || badCost(crc) || badCost(cwc)) {
         errs.endpoints = t("adminModels.costInvalid");
+        if (badCost(crc) || badCost(cwc)) setShowCache(true);
         break;
       }
       endpoints.push({
@@ -431,6 +463,8 @@ function ModelDialog({
         enabled: r.enabled,
         input_cost: ic,
         output_cost: oc,
+        cache_read_cost: crc,
+        cache_write_cost: cwc,
       });
     }
     setErrors(errs);
@@ -443,6 +477,8 @@ function ModelDialog({
       context_length: ctx ?? 0,
       input_price: ip as number,
       output_price: op as number,
+      cache_read_price: crp,
+      cache_write_price: cwp,
       enabled,
       endpoints,
     };
@@ -537,6 +573,35 @@ function ModelDialog({
             required
           />
         </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Input
+            label={t("adminModels.cacheReadPrice")}
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            placeholder={t("adminModels.sameAsInput")}
+            value={cacheRead}
+            onChange={(e) => setCacheRead(e.target.value)}
+            error={errors.cacheRead}
+            hint={t("adminModels.cacheReadHint")}
+            disabled={busy}
+            wrapperClassName="sm:col-start-2"
+          />
+          <Input
+            label={t("adminModels.cacheWritePrice")}
+            type="number"
+            min={0}
+            step="any"
+            inputMode="decimal"
+            placeholder={t("adminModels.sameAsInput")}
+            value={cacheWrite}
+            onChange={(e) => setCacheWrite(e.target.value)}
+            error={errors.cacheWrite}
+            hint={t("adminModels.cacheWriteHint")}
+            disabled={busy}
+          />
+        </div>
         <div className="flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
           <div>
             <div className="text-[13px] font-medium">{t("common.enabled")}</div>
@@ -558,6 +623,14 @@ function ModelDialog({
           </div>
           {providersError && <Notice tone="danger">{providersError.message}</Notice>}
           {!providersError && providers.length === 0 && <Notice tone="warning">{t("adminModels.noProviders")}</Notice>}
+          {rows.length > 0 && (
+            <div className="mb-2 flex w-fit items-center gap-2 text-xs text-muted">
+              <Toggle size="sm" checked={showCache} onChange={setShowCache} label={t("adminModels.showCacheCosts")} />
+              <span className="cursor-pointer select-none" onClick={() => setShowCache((v) => !v)}>
+                {t("adminModels.showCacheCosts")}
+              </span>
+            </div>
+          )}
           {errors.endpoints && <p className="mb-1.5 text-xs text-red-600 dark:text-red-400">{errors.endpoints}</p>}
           {rows.length === 0 ? (
             <div className="rounded-lg border border-dashed border-line px-3 py-5 text-center text-[13px] text-muted">{t("adminModels.noEndpoints")}</div>
@@ -643,6 +716,33 @@ function ModelDialog({
                     />
                     <Toggle size="sm" checked={r.enabled} onChange={(v) => updateRow(r.key, { enabled: v })} disabled={busy} label={t("common.enabled")} />
                     <IconButton icon="trash" label={t("common.remove")} onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} disabled={busy} className="hover:text-red-600" />
+                    {showCache && (
+                      <>
+                        {/* Phones: label on its own line. Desktop: label in the provider/model columns, inputs under "Cost in" / "Cost out". */}
+                        <span className="col-span-5 -mb-1 truncate text-[11px] text-muted sm:col-span-2 sm:mb-0 sm:text-right" title={t("adminModels.cacheCostHint")}>
+                          {t("adminModels.cacheCosts")}
+                        </span>
+                        {(["cache_read_cost", "cache_write_cost"] as const).map((f) => {
+                          const label = f === "cache_read_cost" ? t("adminModels.cacheReadShort") : t("adminModels.cacheWriteShort");
+                          return (
+                            <input
+                              key={f}
+                              className={cx(controlClass, "h-8 px-2 text-[13px]")}
+                              type="number"
+                              min={0}
+                              step="any"
+                              inputMode="decimal"
+                              placeholder={label}
+                              value={r[f]}
+                              onChange={(e) => updateRow(r.key, f === "cache_read_cost" ? { cache_read_cost: e.target.value } : { cache_write_cost: e.target.value })}
+                              disabled={busy}
+                              aria-label={label}
+                              title={`${label} — ${t("adminModels.cacheCostHint")}`}
+                            />
+                          );
+                        })}
+                      </>
+                    )}
                     {circuit && (
                       <div className="col-span-full -mt-1 sm:mt-0">
                         <Badge tone="warning" dot title={t("adminModels.circuitHint")}>
@@ -655,6 +755,7 @@ function ModelDialog({
               })}
               <p className="text-[11px] text-muted">
                 {t("adminModels.priorityHint")} {t("adminModels.costHint")}
+                {showCache && <> {t("adminModels.cacheCostHint")}</>}
               </p>
             </div>
           )}

@@ -54,6 +54,8 @@ type endpointJSON struct {
 	Enabled          bool       `json:"enabled"`
 	InputCost        *float64   `json:"input_cost"`
 	OutputCost       *float64   `json:"output_cost"`
+	CacheReadCost    *float64   `json:"cache_read_cost"`
+	CacheWriteCost   *float64   `json:"cache_write_cost"`
 	CircuitOpenUntil *time.Time `json:"circuit_open_until"`
 }
 
@@ -65,6 +67,8 @@ type modelJSON struct {
 	ContextLength int            `json:"context_length"`
 	InputPrice    float64        `json:"input_price"`
 	OutputPrice   float64        `json:"output_price"`
+	CacheRead     *float64       `json:"cache_read_price"`
+	CacheWrite    *float64       `json:"cache_write_price"`
 	Enabled       bool           `json:"enabled"`
 	CreatedAt     time.Time      `json:"created_at"`
 	Endpoints     []endpointJSON `json:"endpoints"`
@@ -74,19 +78,22 @@ func (s *Server) modelDTO(m *store.Model) modelJSON {
 	eps := make([]endpointJSON, 0, len(m.Endpoints))
 	for _, e := range m.Endpoints {
 		eps = append(eps, endpointJSON{e.ID, e.ProviderID, e.ProviderName, e.UpstreamModel, e.Priority, e.Enabled,
-			e.InputCost, e.OutputCost, s.gw.EndpointOpenUntil(e.ID)})
+			e.InputCost, e.OutputCost, e.CacheReadCost, e.CacheWriteCost, s.gw.EndpointOpenUntil(e.ID)})
 	}
-	return modelJSON{m.ID, m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice, m.Enabled, m.CreatedAt, eps}
+	return modelJSON{m.ID, m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice,
+		m.CacheReadPrice, m.CacheWritePrice, m.Enabled, m.CreatedAt, eps}
 }
 
 type publicModelJSON struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	Description   string  `json:"description"`
-	ContextLength int     `json:"context_length"`
-	InputPrice    float64 `json:"input_price"`
-	OutputPrice   float64 `json:"output_price"`
-	Providers     int     `json:"providers"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	ContextLength int      `json:"context_length"`
+	InputPrice    float64  `json:"input_price"`
+	OutputPrice   float64  `json:"output_price"`
+	CacheRead     *float64 `json:"cache_read_price"`
+	CacheWrite    *float64 `json:"cache_write_price"`
+	Providers     int      `json:"providers"`
 }
 
 type logJSON struct {
@@ -96,6 +103,9 @@ type logJSON struct {
 	APIKeyName       string    `json:"api_key_name"`
 	PromptTokens     int       `json:"prompt_tokens"`
 	CompletionTokens int       `json:"completion_tokens"`
+	CacheReadTokens  int       `json:"cache_read_tokens"`
+	CacheWriteTokens int       `json:"cache_write_tokens"`
+	API              string    `json:"api"`
 	Cost             float64   `json:"cost"`
 	LatencyMS        int64     `json:"latency_ms"`
 	Status           string    `json:"status"`
@@ -107,7 +117,7 @@ type logJSON struct {
 
 func logDTO(l *store.RequestLog) logJSON {
 	return logJSON{l.ID, l.Model, l.ProviderName, l.APIKeyName, l.PromptTokens, l.CompletionTokens,
-		store.ToUSD(l.Cost), l.LatencyMS, l.Status, l.Error, l.Stream, l.CreatedAt, ""}
+		l.CacheReadTokens, l.CacheWriteTokens, l.API, store.ToUSD(l.Cost), l.LatencyMS, l.Status, l.Error, l.Stream, l.CreatedAt, ""}
 }
 
 // adminLogJSON adds what only operators may see.

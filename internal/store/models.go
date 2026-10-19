@@ -11,34 +11,64 @@ import (
 
 // Model is what clients ask for ("openai/gpt-4o"). Prices are USD per 1M tokens.
 type Model struct {
-	ID            int64
-	Slug          string
-	Name          string
-	Description   string
-	ContextLength int
-	InputPrice    float64
-	OutputPrice   float64
-	Enabled       bool
-	CreatedAt     time.Time
-	Endpoints     []Endpoint
+	ID              int64
+	Slug            string
+	Name            string
+	Description     string
+	ContextLength   int
+	InputPrice      float64
+	OutputPrice     float64
+	CacheReadPrice  *float64 // nil = charged as input
+	CacheWritePrice *float64
+	Enabled         bool
+	CreatedAt       time.Time
+	Endpoints       []Endpoint
 }
 
 // Endpoint maps a model onto one provider. Lower priority is tried first.
 type Endpoint struct {
-	ID            int64
-	ModelID       int64
-	ProviderID    int64
-	ProviderName  string
-	UpstreamModel string
-	Priority      int
-	Enabled       bool
-	InputCost     *float64 // USD per 1M tokens paid upstream; nil = unknown
-	OutputCost    *float64
+	ID             int64
+	ModelID        int64
+	ProviderID     int64
+	ProviderName   string
+	UpstreamModel  string
+	Priority       int
+	Enabled        bool
+	InputCost      *float64 // USD per 1M tokens paid upstream; nil = unknown
+	OutputCost     *float64
+	CacheReadCost  *float64 // nil = same as InputCost
+	CacheWriteCost *float64
+}
+
+// TokenUsage is what one request consumed. Prompt includes the cached
+// tokens (CacheRead) and tokens written to the cache (CacheWrite).
+type TokenUsage struct {
+	Prompt, Completion, CacheRead, CacheWrite int
+}
+
+// priceTokens prices usage in nano-USD; prices are USD per 1M tokens (so one
+// token costs price*1000 nano-USD). Cache prices default to the input price.
+func priceTokens(u TokenUsage, in, out float64, cacheRead, cacheWrite *float64) int64 {
+	readP, writeP := in, in
+	if cacheRead != nil {
+		readP = *cacheRead
+	}
+	if cacheWrite != nil {
+		writeP = *cacheWrite
+	}
+	uncached := max(u.Prompt-u.CacheRead-u.CacheWrite, 0)
+	return int64(math.Round((float64(uncached)*in + float64(u.CacheRead)*readP + float64(u.CacheWrite)*writeP +
+		float64(u.Completion)*out) * 1000))
+}
+
+// Charge is what a user pays for usage of this model, in nano-USD.
+func (m *Model) Charge(u TokenUsage) int64 {
+	return priceTokens(u, m.InputPrice, m.OutputPrice, m.CacheReadPrice, m.CacheWritePrice)
 }
 
 // UpstreamCost is what the operator pays for a request through this
 // endpoint, in nano-USD, or nil if the endpoint has no cost configured.
-func (e *Endpoint) UpstreamCost(prompt, completion int) *int64 {
+func (e *Endpoint) UpstreamCost(u TokenUsage) *int64 {
 	if e.InputCost == nil && e.OutputCost == nil {
 		return nil
 	}
@@ -49,18 +79,27 @@ func (e *Endpoint) UpstreamCost(prompt, completion int) *int64 {
 	if e.OutputCost != nil {
 		out = *e.OutputCost
 	}
-	n := int64(math.Round(float64(prompt)*in*1000 + float64(completion)*out*1000))
+	n := priceTokens(u, in, out, e.CacheReadCost, e.CacheWriteCost)
 	return &n
 }
 
 var ErrSlugTaken = errors.New("model slug already exists")
 
-const modelCols = `id, slug, name, description, context_length, input_price, output_price, enabled, created_at`
+const modelCols = `id, slug, name, description, context_length, input_price, output_price, cache_read_price, cache_write_price, enabled, created_at`
+
+func nullFloat(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
+}
 
 func scanModel(row interface{ Scan(...any) error }) (*Model, error) {
 	var m Model
 	var created int64
-	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.ContextLength, &m.InputPrice, &m.OutputPrice, &m.Enabled, &created)
+	var readP, writeP sql.NullFloat64
+	err := row.Scan(&m.ID, &m.Slug, &m.Name, &m.Description, &m.ContextLength, &m.InputPrice, &m.OutputPrice, &readP, &writeP, &m.Enabled, &created)
+	m.CacheReadPrice, m.CacheWritePrice = nullFloat(readP), nullFloat(writeP)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -112,7 +151,8 @@ func (s *Store) ListModels(ctx context.Context, enabledOnly bool) ([]Model, erro
 }
 
 func (s *Store) listEndpoints(ctx context.Context, modelID int64, enabledOnly bool) ([]Endpoint, error) {
-	q := `SELECT e.id, e.model_id, e.provider_id, p.name, e.upstream_model, e.priority, e.enabled, e.input_cost, e.output_cost
+	q := `SELECT e.id, e.model_id, e.provider_id, p.name, e.upstream_model, e.priority, e.enabled, e.input_cost, e.output_cost,
+		e.cache_read_cost, e.cache_write_cost
 		FROM model_endpoints e JOIN providers p ON p.id = e.provider_id WHERE 1 = 1`
 	var args []any
 	if modelID != 0 {
@@ -130,16 +170,13 @@ func (s *Store) listEndpoints(ctx context.Context, modelID int64, enabledOnly bo
 	var out []Endpoint
 	for rows.Next() {
 		var e Endpoint
-		var inCost, outCost sql.NullFloat64
-		if err := rows.Scan(&e.ID, &e.ModelID, &e.ProviderID, &e.ProviderName, &e.UpstreamModel, &e.Priority, &e.Enabled, &inCost, &outCost); err != nil {
+		var inCost, outCost, readCost, writeCost sql.NullFloat64
+		if err := rows.Scan(&e.ID, &e.ModelID, &e.ProviderID, &e.ProviderName, &e.UpstreamModel, &e.Priority, &e.Enabled,
+			&inCost, &outCost, &readCost, &writeCost); err != nil {
 			return nil, err
 		}
-		if inCost.Valid {
-			e.InputCost = &inCost.Float64
-		}
-		if outCost.Valid {
-			e.OutputCost = &outCost.Float64
-		}
+		e.InputCost, e.OutputCost = nullFloat(inCost), nullFloat(outCost)
+		e.CacheReadCost, e.CacheWriteCost = nullFloat(readCost), nullFloat(writeCost)
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -176,9 +213,11 @@ func (s *Store) RouteModel(ctx context.Context, slug string) (*Model, error) {
 func (s *Store) CreateModel(ctx context.Context, m Model) (*Model, error) {
 	var id int64
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `INSERT INTO models (slug, name, description, context_length, input_price, output_price, enabled, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice, boolInt(m.Enabled), now())
+		res, err := tx.ExecContext(ctx, `INSERT INTO models (slug, name, description, context_length, input_price, output_price,
+			cache_read_price, cache_write_price, enabled, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice,
+			m.CacheReadPrice, m.CacheWritePrice, boolInt(m.Enabled), now())
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE") {
 				return ErrSlugTaken
@@ -198,6 +237,8 @@ type ModelUpdate struct {
 	Slug, Name, Description *string
 	ContextLength           *int
 	InputPrice, OutputPrice *float64
+	CacheReadPrice          **float64 // pointer-to-nil clears (charged as input)
+	CacheWritePrice         **float64
 	Enabled                 *bool
 	Endpoints               *[]Endpoint // replaces all endpoints when set
 }
@@ -220,6 +261,12 @@ func (s *Store) UpdateModel(ctx context.Context, id int64, upd ModelUpdate) (*Mo
 		}
 		if upd.InputPrice != nil {
 			add("input_price", *upd.InputPrice)
+		}
+		if upd.CacheReadPrice != nil {
+			add("cache_read_price", *upd.CacheReadPrice)
+		}
+		if upd.CacheWritePrice != nil {
+			add("cache_write_price", *upd.CacheWritePrice)
 		}
 		if upd.OutputPrice != nil {
 			add("output_price", *upd.OutputPrice)
@@ -259,9 +306,11 @@ func (s *Store) UpdateModel(ctx context.Context, id int64, upd ModelUpdate) (*Mo
 func insertEndpoints(ctx context.Context, tx *sql.Tx, modelID int64, eps []Endpoint) error {
 	for _, e := range eps {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO model_endpoints (model_id, provider_id, upstream_model, priority, enabled, input_cost, output_cost)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			modelID, e.ProviderID, e.UpstreamModel, e.Priority, boolInt(e.Enabled), e.InputCost, e.OutputCost); err != nil {
+			`INSERT INTO model_endpoints (model_id, provider_id, upstream_model, priority, enabled,
+			  input_cost, output_cost, cache_read_cost, cache_write_cost)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			modelID, e.ProviderID, e.UpstreamModel, e.Priority, boolInt(e.Enabled),
+			e.InputCost, e.OutputCost, e.CacheReadCost, e.CacheWriteCost); err != nil {
 			return err
 		}
 	}
