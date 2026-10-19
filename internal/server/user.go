@@ -53,10 +53,28 @@ func usdLimit(v *float64) (*int64, bool) {
 	return &n, true
 }
 
+// validRPM accepts nil (no limit) or a positive requests-per-minute value.
+func validRPM(v *int) bool { return v == nil || (*v > 0 && *v <= 1_000_000) }
+
+// cleanModels trims, de-duplicates and drops empty model slugs.
+func cleanModels(in []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, m := range in {
+		if m = strings.TrimSpace(m); m != "" && !seen[m] {
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name        string   `json:"name"`
-		CreditLimit *float64 `json:"credit_limit"`
+		Name          string   `json:"name"`
+		CreditLimit   *float64 `json:"credit_limit"`
+		RateLimitRPM  *int     `json:"rate_limit_rpm"`
+		AllowedModels []string `json:"allowed_models"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -66,13 +84,18 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "credit_limit must be ≥ 0")
 		return
 	}
+	if !validRPM(in.RateLimitRPM) {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "rate_limit_rpm must be a positive number")
+		return
+	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		name = "Key " + time.Now().UTC().Format("2006-01-02")
 	}
 	secret := gateway.KeyPrefix + secure.RandomHex(24)
 	prefix := secret[:len(gateway.KeyPrefix)+6] + "…"
-	k, err := s.store.CreateAPIKey(r.Context(), currentUser(r).ID, name, secure.HashToken(secret), prefix, limit)
+	k, err := s.store.CreateAPIKey(r.Context(), currentUser(r).ID, store.NewAPIKey{Name: name, KeyHash: secure.HashToken(secret),
+		Prefix: prefix, CreditLimit: limit, RateLimitRPM: in.RateLimitRPM, AllowedModels: cleanModels(in.AllowedModels)})
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -86,14 +109,27 @@ func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name        *string            `json:"name"`
-		CreditLimit Optional[*float64] `json:"credit_limit"`
-		Disabled    *bool              `json:"disabled"`
+		Name          *string            `json:"name"`
+		CreditLimit   Optional[*float64] `json:"credit_limit"`
+		RateLimitRPM  Optional[*int]     `json:"rate_limit_rpm"`
+		AllowedModels *[]string          `json:"allowed_models"`
+		Disabled      *bool              `json:"disabled"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	upd := store.APIKeyUpdate{Name: in.Name, Disabled: in.Disabled}
+	if in.RateLimitRPM.Set {
+		if !validRPM(in.RateLimitRPM.Value) {
+			writeErr(w, http.StatusBadRequest, "invalid_request", "rate_limit_rpm must be a positive number")
+			return
+		}
+		upd.RateLimitRPM = &in.RateLimitRPM.Value
+	}
+	if in.AllowedModels != nil {
+		models := cleanModels(*in.AllowedModels)
+		upd.AllowedModels = &models
+	}
 	if in.CreditLimit.Set {
 		limit, valid := usdLimit(in.CreditLimit.Value)
 		if !valid {
@@ -133,7 +169,7 @@ func (s *Server) handleUsageLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]logJSON, 0, len(logs))
 	for i := range logs {
-		out = append(out, logDTO(&logs[i], false))
+		out = append(out, logDTO(&logs[i]))
 	}
 	paged(w, out, total)
 }

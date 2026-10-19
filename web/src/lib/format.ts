@@ -141,3 +141,46 @@ export function parseNumber(s: string): number | null {
   const n = Number(v);
   return Number.isFinite(n) ? n : NaN;
 }
+
+/** 0.982 → "98.2%" (locale-aware). */
+export function formatPercent(ratio: number | null | undefined, opts: { digits?: number; sign?: boolean } = {}): string {
+  if (ratio === null || ratio === undefined || Number.isNaN(ratio)) return "—";
+  if (!Number.isFinite(ratio)) return ratio > 0 ? (opts.sign ? "+∞" : "∞") : "-∞";
+  return nf({
+    style: "percent",
+    maximumFractionDigits: opts.digits ?? 1,
+    signDisplay: opts.sign ? "exceptZero" : "auto",
+  }).format(ratio);
+}
+
+/** Time of day, e.g. "14:05". */
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString(currentLocale, { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Short duration from seconds, e.g. "2 min 13 s" / "2m 13s" depending on the locale. */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const unit = (n: number, u: "hour" | "minute" | "second") => nf({ style: "unit", unit: u, unitDisplay: "narrow" }).format(n);
+  if (s >= 3600) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return m ? `${unit(h, "hour")} ${unit(m, "minute")}` : unit(h, "hour");
+  }
+  if (s >= 60) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r ? `${unit(m, "minute")} ${unit(r, "second")}` : unit(m, "minute");
+  }
+  return unit(s, "second");
+}
+
+/** True when an RFC 3339 timestamp is in the future (relative to `now`, default Date.now()). */
+export function isFuture(iso: string | null | undefined, now = Date.now()): boolean {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) && t > now;
+}

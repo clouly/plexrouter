@@ -288,8 +288,8 @@ func TestEndToEnd(t *testing.T) {
 
 	newProvider := func(name, typ, base, key string) float64 {
 		p := c.must("POST", "/api/admin/providers", "", map[string]any{"name": name, "type": typ, "base_url": base, "api_key": key})
-		if hint := get(p, "provider", "api_key_hint").(string); strings.Contains(hint, key) && len(key) > 6 {
-			t.Errorf("api key not masked: %q", hint)
+		if n := get(p, "provider", "keys_total"); n != 1.0 {
+			t.Errorf("provider keys_total = %v", n)
 		}
 		return get(p, "provider", "id").(float64)
 	}

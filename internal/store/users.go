@@ -21,6 +21,7 @@ type User struct {
 	Role         string
 	Balance      int64 // nano-USD
 	Disabled     bool
+	RateLimitRPM *int // requests/minute across the user's keys; nil = server default
 	CreatedAt    time.Time
 }
 
@@ -28,12 +29,19 @@ func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
 
 var ErrEmailTaken = errors.New("email already registered")
 
-const userCols = `id, email, name, password_hash, role, balance, disabled, created_at`
+const (
+	userCols = `id, email, name, password_hash, role, balance, disabled, created_at, rate_limit_rpm`
+	// userColsU is userCols for queries that alias users as "u".
+	userColsU = `u.id, u.email, u.name, u.password_hash, u.role, u.balance, u.disabled, u.created_at, u.rate_limit_rpm`
+)
 
-func scanUser(row interface{ Scan(...any) error }) (*User, error) {
+// scanUser reads userCols, followed by any extra columns into extra.
+func scanUser(row interface{ Scan(...any) error }, extra ...any) (*User, error) {
 	var u User
 	var created int64
-	err := row.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Balance, &u.Disabled, &created)
+	var rpm sql.NullInt64
+	dest := append([]any{&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Balance, &u.Disabled, &created, &rpm}, extra...)
+	err := row.Scan(dest...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -41,6 +49,10 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 		return nil, err
 	}
 	u.CreatedAt = unixTime(created)
+	if rpm.Valid {
+		n := int(rpm.Int64)
+		u.RateLimitRPM = &n
+	}
 	return &u, nil
 }
 
@@ -107,8 +119,7 @@ func (s *Store) ListUsers(ctx context.Context, q string, p Page) ([]UserWithStat
 	}
 	limit, offset := p.limitOffset()
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT u.id, u.email, u.name, u.password_hash, u.role, u.balance, u.disabled, u.created_at,
-		       COALESCE(SUM(l.cost), 0), COUNT(l.id)
+		SELECT `+userColsU+`, COALESCE(SUM(l.cost), 0), COUNT(l.id)
 		FROM users u LEFT JOIN request_logs l ON l.user_id = u.id`+where+`
 		GROUP BY u.id ORDER BY u.id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
@@ -118,21 +129,21 @@ func (s *Store) ListUsers(ctx context.Context, q string, p Page) ([]UserWithStat
 	var out []UserWithStats
 	for rows.Next() {
 		var u UserWithStats
-		var created int64
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.PasswordHash, &u.Role, &u.Balance, &u.Disabled, &created,
-			&u.TotalCost, &u.Requests); err != nil {
+		base, err := scanUser(rows, &u.TotalCost, &u.Requests)
+		if err != nil {
 			return nil, 0, err
 		}
-		u.CreatedAt = unixTime(created)
+		u.User = *base
 		out = append(out, u)
 	}
 	return out, total, rows.Err()
 }
 
 type UserUpdate struct {
-	Name     *string
-	Role     *string
-	Disabled *bool
+	Name         *string
+	Role         *string
+	Disabled     *bool
+	RateLimitRPM **int // set to a pointer-to-nil to fall back to the server default
 }
 
 func (s *Store) UpdateUser(ctx context.Context, id int64, upd UserUpdate) (*User, error) {
@@ -145,6 +156,9 @@ func (s *Store) UpdateUser(ctx context.Context, id int64, upd UserUpdate) (*User
 	}
 	if upd.Disabled != nil {
 		sets, args = append(sets, "disabled = ?"), append(args, boolInt(*upd.Disabled))
+	}
+	if upd.RateLimitRPM != nil {
+		sets, args = append(sets, "rate_limit_rpm = ?"), append(args, *upd.RateLimitRPM)
 	}
 	if len(sets) > 0 {
 		res, err := s.db.ExecContext(ctx, `UPDATE users SET `+strings.Join(sets, ", ")+` WHERE id = ?`, append(args, id)...)
@@ -198,7 +212,7 @@ func (s *Store) CreateSession(ctx context.Context, tokenHash string, userID int6
 // SessionUser returns the user owning a live session.
 func (s *Store) SessionUser(ctx context.Context, tokenHash string) (*User, error) {
 	return scanUser(s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.email, u.name, u.password_hash, u.role, u.balance, u.disabled, u.created_at
+		SELECT `+userColsU+`
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ? AND s.expires_at > ?`, tokenHash, now()))
 }

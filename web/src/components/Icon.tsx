@@ -39,6 +39,8 @@ const paths = {
   arrowRight: "M5 12h14m-6-6 6 6-6 6",
   terminal: "m4 17 6-6-6-6m8 14h8",
   login: "M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4m-5-4 5-5-5-5m5 5H3",
+  trending: "M23 6l-9.5 9.5-5-5L1 18M17 6h6v6",
+  checkCircle: "M22 11.1V12a10 10 0 1 1-5.9-9.1M22 4 12 14l-3-3",
 } as const;
 
 export type IconName = keyof typeof paths;

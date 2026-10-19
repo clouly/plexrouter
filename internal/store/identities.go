@@ -20,7 +20,7 @@ type Identity struct {
 // IdentityUser returns the user linked to a provider account.
 func (s *Store) IdentityUser(ctx context.Context, provider, subject string) (*User, error) {
 	return scanUser(s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.email, u.name, u.password_hash, u.role, u.balance, u.disabled, u.created_at
+		SELECT `+userColsU+`
 		FROM user_identities i JOIN users u ON u.id = i.user_id
 		WHERE i.provider = ? AND i.subject = ?`, provider, subject))
 }

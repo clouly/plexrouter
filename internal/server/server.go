@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/local4a/plexrouter/internal/catalog"
 	"github.com/local4a/plexrouter/internal/config"
 	"github.com/local4a/plexrouter/internal/gateway"
 	"github.com/local4a/plexrouter/internal/oauth"
@@ -32,11 +33,12 @@ type Server struct {
 	web     fs.FS // built console (index.html + assets); may be empty
 	limiter *rateLimiter
 	oauth   map[string]*oauth.Provider // configured sign-in providers by name
+	catalog *catalog.Catalog
 }
 
 func New(cfg *config.Config, st *store.Store, box *secure.Box, gw *gateway.Gateway, web fs.FS, version string, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, store: st, box: box, gw: gw, web: web, version: version, log: log,
-		limiter: newRateLimiter(20, time.Minute), oauth: map[string]*oauth.Provider{}}
+		limiter: newRateLimiter(20, time.Minute), oauth: map[string]*oauth.Provider{}, catalog: catalog.New()}
 	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
 		s.SetOAuthProvider(oauth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret))
 	}
@@ -77,6 +79,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/admin/providers/{id}", s.admin(s.handleDeleteProvider))
 	mux.HandleFunc("POST /api/admin/providers/{id}/test", s.admin(s.handleTestProvider))
 	mux.HandleFunc("GET /api/admin/providers/{id}/upstream-models", s.admin(s.handleUpstreamModels))
+	mux.HandleFunc("GET /api/admin/providers/{id}/keys", s.admin(s.handleListProviderKeys))
+	mux.HandleFunc("POST /api/admin/providers/{id}/keys", s.admin(s.handleCreateProviderKeys))
+	mux.HandleFunc("PATCH /api/admin/providers/{id}/keys/{keyId}", s.admin(s.handleUpdateProviderKey))
+	mux.HandleFunc("DELETE /api/admin/providers/{id}/keys/{keyId}", s.admin(s.handleDeleteProviderKey))
+	mux.HandleFunc("GET /api/admin/report", s.admin(s.handleReport))
+	mux.HandleFunc("GET /api/admin/catalog", s.admin(s.handleCatalog))
+	mux.HandleFunc("POST /api/admin/catalog/import", s.admin(s.handleCatalogImport))
 	mux.HandleFunc("GET /api/admin/models", s.admin(s.handleListModels))
 	mux.HandleFunc("POST /api/admin/models", s.admin(s.handleCreateModel))
 	mux.HandleFunc("POST /api/admin/models/import", s.admin(s.handleImportModels))

@@ -24,6 +24,8 @@ type Config struct {
 	AdminEmails    []string      // lowercased; these accounts are admins. Empty = first user is admin
 	RequestTimeout time.Duration // upper bound for a single upstream request
 	TrustProxy     bool          // trust X-Forwarded-For / X-Real-IP (behind a reverse proxy)
+	DefaultUserRPM int           // requests/minute per user unless set per user; 0 = unlimited
+	LogRetention   int           // days to keep request logs; 0 = forever
 	LogLevel       slog.Level
 
 	// PublicURL is the externally visible base URL (https://api.example.com),
@@ -45,6 +47,8 @@ func Load() (*Config, error) {
 		AdminEmails:    envList("PLEXROUTER_ADMIN_EMAILS"),
 		RequestTimeout: envDuration("PLEXROUTER_REQUEST_TIMEOUT", 10*time.Minute),
 		TrustProxy:     envBool("PLEXROUTER_TRUST_PROXY", false),
+		DefaultUserRPM: envInt("PLEXROUTER_DEFAULT_USER_RPM", 0),
+		LogRetention:   envInt("PLEXROUTER_LOG_RETENTION_DAYS", 90),
 
 		PublicURL:          strings.TrimRight(os.Getenv("PLEXROUTER_PUBLIC_URL"), "/"),
 		GoogleClientID:     os.Getenv("PLEXROUTER_GOOGLE_CLIENT_ID"),
@@ -112,6 +116,13 @@ func envList(key string) []string {
 
 func envBool(key string, def bool) bool {
 	if v, err := strconv.ParseBool(os.Getenv(key)); err == nil {
+		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v >= 0 {
 		return v
 	}
 	return def

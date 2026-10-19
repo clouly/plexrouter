@@ -61,7 +61,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	gw := gateway.New(st, box, cfg.RequestTimeout, log)
+	gw := gateway.New(st, box, gateway.Options{Timeout: cfg.RequestTimeout, DefaultUserRPM: cfg.DefaultUserRPM}, log)
 	srv := server.New(cfg, st, box, gw, web.Dist(), version, log)
 
 	httpServer := &http.Server{
@@ -73,7 +73,7 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go purgeSessions(ctx, st)
+	go housekeeping(ctx, st, cfg.LogRetention)
 
 	errc := make(chan error, 1)
 	go func() {
@@ -95,17 +95,27 @@ func run() error {
 	return nil
 }
 
-func purgeSessions(ctx context.Context, st *store.Store) {
+// housekeeping hourly removes expired sessions and request logs older than
+// the retention period (retentionDays 0 keeps logs forever).
+func housekeeping(ctx context.Context, st *store.Store, retentionDays int) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
+		if err := st.PurgeExpiredSessions(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("purge sessions", "err", err)
+		}
+		if retentionDays > 0 {
+			n, err := st.PurgeLogs(ctx, time.Now().AddDate(0, 0, -retentionDays))
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("purge request logs", "err", err)
+			} else if n > 0 {
+				slog.Info("purged old request logs", "rows", n, "retention_days", retentionDays)
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := st.PurgeExpiredSessions(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("purge sessions", "err", err)
-			}
 		}
 	}
 }

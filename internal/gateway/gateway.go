@@ -31,11 +31,18 @@ type Gateway struct {
 	store   *store.Store
 	box     *secure.Box
 	client  *http.Client
-	timeout time.Duration
+	opts    Options
 	log     *slog.Logger
+	health  *health
+	limiter *rateLimiter
 }
 
-func New(st *store.Store, box *secure.Box, timeout time.Duration, log *slog.Logger) *Gateway {
+type Options struct {
+	Timeout        time.Duration // upper bound for one upstream request
+	DefaultUserRPM int           // requests/minute per user unless set on the user; 0 = unlimited
+}
+
+func New(st *store.Store, box *secure.Box, opts Options, log *slog.Logger) *Gateway {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -46,7 +53,8 @@ func New(st *store.Store, box *secure.Box, timeout time.Duration, log *slog.Logg
 		TLSHandshakeTimeout:   15 * time.Second,
 		ExpectContinueTimeout: time.Second,
 	}
-	return &Gateway{store: st, box: box, client: &http.Client{Transport: transport}, timeout: timeout, log: log}
+	return &Gateway{store: st, box: box, client: &http.Client{Transport: transport}, opts: opts, log: log,
+		health: newHealth(), limiter: newRateLimiter()}
 }
 
 // Register mounts the API under /v1 and /api/v1 (OpenRouter-style base URL).
@@ -60,15 +68,6 @@ func (g *Gateway) Register(mux *http.ServeMux) {
 			writeError(w, http.StatusNotFound, "not_found", "unknown endpoint "+r.Method+" "+r.URL.Path)
 		})
 	}
-}
-
-// Adapter builds a provider adapter from a stored provider.
-func (g *Gateway) Adapter(p *store.Provider) (provider.Adapter, error) {
-	key, err := g.box.Decrypt(p.APIKeyEnc)
-	if err != nil {
-		return nil, err
-	}
-	return provider.New(provider.Config{Type: p.Type, BaseURL: p.BaseURL, APIKey: key}, g.client)
 }
 
 // --- errors ---
@@ -88,6 +87,12 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func writeAPIError(w http.ResponseWriter, err error) {
+	var rl *rateLimited
+	if errors.As(err, &rl) {
+		w.Header().Set("Retry-After", strconv.Itoa(int(rl.wait.Seconds())+1))
+		writeError(w, http.StatusTooManyRequests, "rate_limited", rl.Error())
+		return
+	}
 	var ae *apiError
 	if errors.As(err, &ae) {
 		writeError(w, ae.status, ae.code, ae.message)
@@ -203,15 +208,6 @@ func (g *Gateway) candidates(ctx context.Context, slugs []string) ([]candidate, 
 	return out, nil
 }
 
-func (g *Gateway) adapterFor(ctx context.Context, providerID int64) (provider.Adapter, *store.Provider, error) {
-	p, err := g.store.GetProvider(ctx, providerID)
-	if err != nil {
-		return nil, nil, err
-	}
-	a, err := g.Adapter(p)
-	return a, p, err
-}
-
 // --- billing ---
 
 // cost converts token counts to nano-USD. Prices are USD per 1M tokens, so one
@@ -241,21 +237,27 @@ func estimateTokens(bytes int) int {
 	return (bytes + 3) / 4
 }
 
-func (g *Gateway) record(c *caller, cand *candidate, providerName string, prompt, completion int, nano int64,
-	started time.Time, stream bool, callErr error) {
+// record logs one upstream attempt and charges its cost. Failed attempts
+// cost nothing, for the user or the operator.
+func (g *Gateway) record(c *caller, rt *route, prompt, completion int, nano int64, stream bool, callErr error) {
 	l := store.RequestLog{
 		UserID: c.user.ID, APIKeyID: c.key.ID, APIKeyName: c.key.Name,
+		Model: rt.cand.model.Slug, ProviderID: rt.provider.ID, ProviderName: rt.provider.Name,
 		PromptTokens: prompt, CompletionTokens: completion, Cost: nano,
-		LatencyMS: time.Since(started).Milliseconds(), Status: "success", Stream: stream,
+		LatencyMS: time.Since(rt.started).Milliseconds(), Status: "success", Stream: stream,
 	}
-	if cand != nil {
-		l.Model, l.ProviderID, l.ProviderName = cand.model.Slug, cand.endpoint.ProviderID, providerName
+	if rt.key != nil {
+		l.ProviderKeyID, l.ProviderKeyName = rt.key.ID, rt.key.Name
 	}
 	if callErr != nil {
+		zero := int64(0)
+		l.UpstreamCost = &zero
 		l.Status, l.Error = "error", callErr.Error()
 		if len(l.Error) > 1000 {
 			l.Error = l.Error[:1000]
 		}
+	} else {
+		l.UpstreamCost = rt.cand.endpoint.UpstreamCost(prompt, completion)
 	}
 	// Record even if the client went away mid-request.
 	if err := g.store.RecordRequest(context.Background(), l); err != nil {
@@ -287,51 +289,37 @@ func (g *Gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "\"messages\" must not be empty")
 		return
 	}
-	cands, err := g.candidates(r.Context(), append([]string{req.Model}, req.Models...))
+	if err := g.checkLimits(c); err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	slugs, err := c.allowedSlugs(append([]string{req.Model}, req.Models...))
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	cands, err := g.candidates(r.Context(), slugs)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), g.timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), g.opts.Timeout)
 	defer cancel()
 	promptEstimate := estimatePrompt(req)
 
-	var lastErr error
-	for i := range cands {
-		cand := &cands[i]
-		if err := c.checkFunds(cand.model); err != nil {
-			lastErr = err
-			continue
-		}
-		adapter, prov, err := g.adapterFor(ctx, cand.endpoint.ProviderID)
-		if err != nil {
-			lastErr = err
-			g.log.Warn("provider unusable", "provider", cand.endpoint.ProviderID, "err", err)
-			continue
-		}
-		started := time.Now()
+	err = g.dispatch(ctx, c, cands, req.Stream, func(rt *route) error {
 		if req.Stream {
-			stream, err := adapter.ChatStream(ctx, req, cand.endpoint.UpstreamModel)
+			stream, err := rt.adapter.ChatStream(ctx, req, rt.cand.endpoint.UpstreamModel)
 			if err != nil {
-				lastErr = err
-				g.record(c, cand, prov.Name, 0, 0, 0, started, true, err)
-				if !provider.Retryable(err) || ctx.Err() != nil {
-					break
-				}
-				continue
+				return err
 			}
-			g.relayStream(w, c, cand, prov.Name, stream, started, promptEstimate)
-			return
+			g.relayStream(w, c, rt, stream, promptEstimate)
+			return nil
 		}
-		resp, err := adapter.Chat(ctx, req, cand.endpoint.UpstreamModel)
+		resp, err := rt.adapter.Chat(ctx, req, rt.cand.endpoint.UpstreamModel)
 		if err != nil {
-			lastErr = err
-			g.record(c, cand, prov.Name, 0, 0, 0, started, false, err)
-			if !provider.Retryable(err) || ctx.Err() != nil {
-				break
-			}
-			continue
+			return err
 		}
 		prompt, completion := promptEstimate, 0
 		if u := provider.UsageOf(resp); u != nil {
@@ -339,22 +327,24 @@ func (g *Gateway) handleChat(w http.ResponseWriter, r *http.Request) {
 		} else {
 			completion = estimateTokens(len(contentOf(resp)))
 		}
-		nano := cost(cand.model, prompt, completion)
-		resp["model"] = cand.model.Slug
-		resp["provider"] = prov.Name
+		nano := cost(rt.cand.model, prompt, completion)
+		resp["model"] = rt.cand.model.Slug
+		resp["provider"] = rt.provider.Name
 		setUsageCost(resp, nano)
 		writeJSON(w, resp)
-		g.record(c, cand, prov.Name, prompt, completion, nano, started, false, nil)
-		return
+		g.record(c, rt, prompt, completion, nano, false, nil)
+		return nil
+	})
+	if err != nil {
+		writeAPIError(w, err)
 	}
-	writeAPIError(w, lastErr)
 }
 
 // relayStream copies chunks to the client as server-sent events. Once the
 // first byte is written there is no falling back, so errors are reported
 // in-band as an "error" event.
-func (g *Gateway) relayStream(w http.ResponseWriter, c *caller, cand *candidate, providerName string,
-	stream provider.Stream, started time.Time, promptEstimate int) {
+func (g *Gateway) relayStream(w http.ResponseWriter, c *caller, rt *route, stream provider.Stream, promptEstimate int) {
+	cand := rt.cand
 	defer stream.Close()
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -384,7 +374,7 @@ func (g *Gateway) relayStream(w http.ResponseWriter, c *caller, cand *candidate,
 			setUsageCost(ch, cost(cand.model, u.PromptTokens, u.CompletionTokens))
 		}
 		ch["model"] = cand.model.Slug
-		ch["provider"] = providerName
+		ch["provider"] = rt.provider.Name
 		b, err := json.Marshal(ch)
 		if err != nil {
 			continue
@@ -408,7 +398,7 @@ func (g *Gateway) relayStream(w http.ResponseWriter, c *caller, cand *candidate,
 	if usage != nil {
 		prompt, completion = usage.PromptTokens, usage.CompletionTokens
 	}
-	g.record(c, cand, providerName, prompt, completion, cost(cand.model, prompt, completion), started, true, streamErr)
+	g.record(c, rt, prompt, completion, cost(cand.model, prompt, completion), true, streamErr)
 }
 
 // contentOf returns the generated text in a response or chunk, used to
@@ -450,52 +440,44 @@ func (g *Gateway) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body: "+err.Error())
 		return
 	}
+	if err := g.checkLimits(c); err != nil {
+		writeAPIError(w, err)
+		return
+	}
 	slug, _ := body["model"].(string)
-	cands, err := g.candidates(r.Context(), []string{slug})
+	slugs, err := c.allowedSlugs([]string{slug})
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), g.timeout)
+	cands, err := g.candidates(r.Context(), slugs)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), g.opts.Timeout)
 	defer cancel()
 
-	var lastErr error
-	for i := range cands {
-		cand := &cands[i]
-		if err := c.checkFunds(cand.model); err != nil {
-			lastErr = err
-			continue
-		}
-		adapter, prov, err := g.adapterFor(ctx, cand.endpoint.ProviderID)
+	err = g.dispatch(ctx, c, cands, false, func(rt *route) error {
+		resp, err := rt.adapter.Embeddings(ctx, body, rt.cand.endpoint.UpstreamModel)
 		if err != nil {
-			lastErr = err
-			continue
-		}
-		started := time.Now()
-		resp, err := adapter.Embeddings(ctx, body, cand.endpoint.UpstreamModel)
-		if err != nil {
-			lastErr = err
-			if !errors.Is(err, provider.ErrUnsupported) {
-				g.record(c, cand, prov.Name, 0, 0, 0, started, false, err)
-			}
-			if !provider.Retryable(err) || ctx.Err() != nil {
-				break
-			}
-			continue
+			return err
 		}
 		prompt := 0
 		if u := provider.UsageOf(resp); u != nil {
 			prompt = u.PromptTokens
 		}
-		nano := cost(cand.model, prompt, 0)
-		resp["model"] = cand.model.Slug
-		resp["provider"] = prov.Name
+		nano := cost(rt.cand.model, prompt, 0)
+		resp["model"] = rt.cand.model.Slug
+		resp["provider"] = rt.provider.Name
 		setUsageCost(resp, nano)
 		writeJSON(w, resp)
-		g.record(c, cand, prov.Name, prompt, 0, nano, started, false, nil)
-		return
+		g.record(c, rt, prompt, 0, nano, false, nil)
+		return nil
+	})
+	if err != nil {
+		writeAPIError(w, err)
 	}
-	writeAPIError(w, lastErr)
 }
 
 func (g *Gateway) handleModels(w http.ResponseWriter, r *http.Request) {

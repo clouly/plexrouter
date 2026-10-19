@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -84,8 +85,10 @@ func New(cfg Config, client *http.Client) (Adapter, error) {
 // Error is a failed upstream call. Status 0 means the request never got an
 // HTTP response (network error, timeout).
 type Error struct {
-	Status  int
-	Message string
+	Status     int
+	Message    string
+	Code       string        // upstream error code/type if any, e.g. "insufficient_quota"
+	RetryAfter time.Duration // from a Retry-After header, if any
 }
 
 func (e *Error) Error() string {
@@ -148,7 +151,11 @@ func (h httpClient) do(ctx context.Context, method, url string, body any, header
 	if resp.StatusCode/100 != 2 {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return nil, &Error{Status: resp.StatusCode, Message: errorMessage(b)}
+		e := &Error{Status: resp.StatusCode, Message: errorMessage(b), Code: errorCode(b)}
+		if secs, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && secs > 0 {
+			e.RetryAfter = time.Duration(secs) * time.Second
+		}
+		return nil, e
 	}
 	return resp, nil
 }
@@ -207,6 +214,32 @@ func errorMessage(body []byte) string {
 		s = "empty response"
 	}
 	return s
+}
+
+// errorCode pulls a machine-readable code out of common error shapes
+// (OpenAI "code"/"type", Anthropic "type", Gemini "status").
+func errorCode(body []byte) string {
+	var v struct {
+		Error struct {
+			Code   any    `json:"code"`
+			Type   string `json:"type"`
+			Status string `json:"status"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &v) != nil {
+		var arr []json.RawMessage
+		if json.Unmarshal(body, &arr) == nil && len(arr) > 0 {
+			return errorCode(arr[0])
+		}
+		return ""
+	}
+	if s, ok := v.Error.Code.(string); ok && s != "" {
+		return s
+	}
+	if v.Error.Status != "" {
+		return v.Error.Status
+	}
+	return v.Error.Type
 }
 
 // sseReader reads "data:" payloads from a server-sent event stream.

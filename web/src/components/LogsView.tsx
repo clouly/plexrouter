@@ -62,7 +62,7 @@ export function LogsView({ admin = false }: { admin?: boolean }) {
 
   const rows = logs.data?.data ?? [];
   const total = logs.data?.total ?? 0;
-  const cols = admin ? 11 : 10;
+  const cols = admin ? 13 : 10;
 
   const filters = (
     <>
@@ -119,16 +119,22 @@ export function LogsView({ admin = false }: { admin?: boolean }) {
 
   return (
     <Card flush title={t("logs.title")} description={t("logs.hint")} actions={filters}>
-      <Table minWidth={admin ? 1080 : 940}>
+      <Table minWidth={admin ? 1320 : 940}>
         <THead>
           <Th>{t("logs.time")}</Th>
           {admin && <Th>{t("logs.user")}</Th>}
           <Th>{t("logs.model")}</Th>
           <Th>{t("logs.provider")}</Th>
+          {admin && <Th>{t("logs.providerKey")}</Th>}
           <Th>{t("logs.key")}</Th>
           <Th align="right">{t("logs.tokensIn")}</Th>
           <Th align="right">{t("logs.tokensOut")}</Th>
           <Th align="right">{t("logs.cost")}</Th>
+          {admin && (
+            <Th align="right" title={t("logs.upstreamCostHint")}>
+              {t("logs.upstreamCost")}
+            </Th>
+          )}
           <Th align="right">{t("logs.latency")}</Th>
           <Th>{t("logs.status")}</Th>
           <Th className="w-8" />
@@ -186,6 +192,11 @@ function LogRow({ log: l, admin, cols, open, onToggle }: { log: UsageLog; admin:
           </div>
         </Td>
         <Td className="whitespace-nowrap">{l.provider || <span className="text-muted">—</span>}</Td>
+        {admin && (
+          <Td className="max-w-40 truncate text-muted" title={l.provider_key || undefined}>
+            {l.provider_key || "—"}
+          </Td>
+        )}
         <Td className="max-w-40 truncate text-muted" title={l.api_key_name}>
           {l.api_key_name || "—"}
         </Td>
@@ -194,6 +205,11 @@ function LogRow({ log: l, admin, cols, open, onToggle }: { log: UsageLog; admin:
         <Td align="right" className="font-medium whitespace-nowrap">
           {formatUSD(l.cost)}
         </Td>
+        {admin && (
+          <Td align="right" className="whitespace-nowrap text-muted">
+            {l.upstream_cost === null || l.upstream_cost === undefined ? "—" : formatUSD(l.upstream_cost)}
+          </Td>
+        )}
         <Td align="right" className="whitespace-nowrap text-muted">
           {formatLatency(l.latency_ms)}
         </Td>

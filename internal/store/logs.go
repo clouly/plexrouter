@@ -16,9 +16,12 @@ type RequestLog struct {
 	Model            string
 	ProviderID       int64
 	ProviderName     string
+	ProviderKeyID    int64
+	ProviderKeyName  string
 	PromptTokens     int
 	CompletionTokens int
-	Cost             int64 // nano-USD
+	Cost             int64  // nano-USD charged to the user
+	UpstreamCost     *int64 // nano-USD paid upstream; nil = endpoint has no cost configured
 	LatencyMS        int64
 	Status           string // "success" | "error"
 	Error            string
@@ -32,12 +35,17 @@ func (s *Store) RecordRequest(ctx context.Context, l RequestLog) error {
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		t := now()
 		if _, err := tx.ExecContext(ctx, `INSERT INTO request_logs
-			(user_id, api_key_id, api_key_name, model, provider_id, provider_name, prompt_tokens, completion_tokens,
-			 cost, latency_ms, status, error, stream, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			l.UserID, l.APIKeyID, l.APIKeyName, l.Model, l.ProviderID, l.ProviderName, l.PromptTokens, l.CompletionTokens,
-			l.Cost, l.LatencyMS, l.Status, l.Error, boolInt(l.Stream), t); err != nil {
+			(user_id, api_key_id, api_key_name, model, provider_id, provider_name, provider_key_id, provider_key_name,
+			 prompt_tokens, completion_tokens, cost, upstream_cost, latency_ms, status, error, stream, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			l.UserID, l.APIKeyID, l.APIKeyName, l.Model, l.ProviderID, l.ProviderName, l.ProviderKeyID, l.ProviderKeyName,
+			l.PromptTokens, l.CompletionTokens, l.Cost, l.UpstreamCost, l.LatencyMS, l.Status, l.Error, boolInt(l.Stream), t); err != nil {
 			return err
+		}
+		if l.ProviderKeyID != 0 && l.Status == "success" {
+			if _, err := tx.ExecContext(ctx, `UPDATE provider_keys SET last_used_at = ? WHERE id = ?`, t, l.ProviderKeyID); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE api_keys SET usage = usage + ?, last_used_at = ? WHERE id = ?`,
 			l.Cost, t, l.APIKeyID); err != nil {
@@ -73,7 +81,8 @@ func (s *Store) ListLogs(ctx context.Context, f LogFilter, p Page) ([]RequestLog
 	limit, offset := p.limitOffset()
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT l.id, l.user_id, COALESCE(u.email, ''), l.api_key_id, l.api_key_name, l.model, l.provider_id, l.provider_name,
-		       l.prompt_tokens, l.completion_tokens, l.cost, l.latency_ms, l.status, l.error, l.stream, l.created_at
+		       l.provider_key_id, l.provider_key_name, l.prompt_tokens, l.completion_tokens, l.cost, l.upstream_cost,
+		       l.latency_ms, l.status, l.error, l.stream, l.created_at
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+where+`
 		ORDER BY l.id DESC LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
@@ -84,9 +93,14 @@ func (s *Store) ListLogs(ctx context.Context, f LogFilter, p Page) ([]RequestLog
 	for rows.Next() {
 		var l RequestLog
 		var created int64
+		var upstream sql.NullInt64
 		if err := rows.Scan(&l.ID, &l.UserID, &l.UserEmail, &l.APIKeyID, &l.APIKeyName, &l.Model, &l.ProviderID, &l.ProviderName,
-			&l.PromptTokens, &l.CompletionTokens, &l.Cost, &l.LatencyMS, &l.Status, &l.Error, &l.Stream, &created); err != nil {
+			&l.ProviderKeyID, &l.ProviderKeyName, &l.PromptTokens, &l.CompletionTokens, &l.Cost, &upstream,
+			&l.LatencyMS, &l.Status, &l.Error, &l.Stream, &created); err != nil {
 			return nil, 0, err
+		}
+		if upstream.Valid {
+			l.UpstreamCost = &upstream.Int64
 		}
 		l.CreatedAt = unixTime(created)
 		out = append(out, l)

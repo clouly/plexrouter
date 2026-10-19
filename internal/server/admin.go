@@ -37,9 +37,23 @@ func (s *Server) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	today := st.Daily[len(st.Daily)-1]
+	rep, err := s.store.Report(ctx, 1)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	alerts, err := s.alerts(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if alerts == nil {
+		alerts = []alertJSON{}
+	}
 	ok(w, map[string]any{
 		"users": users, "providers": providers, "models": models, "total_balance": store.ToUSD(balance),
-		"requests_today": today.Requests, "cost_today": store.ToUSD(today.Cost), "daily": dailyDTO(st.Daily),
+		"requests_today": today.Requests, "cost_today": store.ToUSD(today.Cost), "profit_today": store.ToUSD(rep.Totals.Profit),
+		"daily": dailyDTO(st.Daily), "alerts": alerts,
 	})
 }
 
@@ -79,14 +93,10 @@ func (in *providerInput) validate(creating bool) string {
 }
 
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
-	ps, err := s.store.ListProviders(r.Context())
+	out, err := s.providerViews(r.Context())
 	if err != nil {
 		s.fail(w, r, err)
 		return
-	}
-	out := make([]providerJSON, 0, len(ps))
-	for i := range ps {
-		out = append(out, providerDTO(&ps[i], s.box))
 	}
 	ok(w, map[string]any{"data": out})
 }
@@ -108,9 +118,6 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "base_url is required for openai_compatible providers")
 		return
 	}
-	if in.APIKey != nil {
-		p.APIKeyEnc = s.box.Encrypt(strings.TrimSpace(*in.APIKey))
-	}
 	if in.Enabled != nil {
 		p.Enabled = *in.Enabled
 	}
@@ -119,7 +126,18 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	ok(w, map[string]any{"provider": providerDTO(created, s.box)})
+	if in.APIKey != nil && strings.TrimSpace(*in.APIKey) != "" {
+		if _, err := s.addProviderKeys(r.Context(), created.ID, "Default", []string{*in.APIKey}); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	view, err := s.providerView(r.Context(), created.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	ok(w, map[string]any{"provider": view})
 }
 
 func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
@@ -136,16 +154,16 @@ func (s *Server) handleUpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upd := store.ProviderUpdate{Name: in.Name, Type: in.Type, BaseURL: in.BaseURL, Enabled: in.Enabled}
-	if in.APIKey != nil && strings.TrimSpace(*in.APIKey) != "" {
-		enc := s.box.Encrypt(strings.TrimSpace(*in.APIKey))
-		upd.APIKeyEnc = &enc
+	if _, err := s.store.UpdateProvider(r.Context(), id, upd); err != nil {
+		s.fail(w, r, err)
+		return
 	}
-	p, err := s.store.UpdateProvider(r.Context(), id, upd)
+	view, err := s.providerView(r.Context(), id)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	ok(w, map[string]any{"provider": providerDTO(p, s.box)})
+	ok(w, map[string]any{"provider": view})
 }
 
 func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
@@ -165,11 +183,10 @@ func (s *Server) upstreamModels(r *http.Request) ([]string, time.Duration, error
 	if err != nil {
 		return nil, 0, store.ErrNotFound
 	}
-	p, err := s.store.GetProvider(r.Context(), id)
-	if err != nil {
+	if _, err := s.store.GetProvider(r.Context(), id); err != nil {
 		return nil, 0, err
 	}
-	a, err := s.gw.Adapter(p)
+	a, err := s.gw.ProviderAdapter(r.Context(), id)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -219,10 +236,12 @@ func (s *Server) handleUpstreamModels(w http.ResponseWriter, r *http.Request) {
 // --- models ---
 
 type endpointInput struct {
-	ProviderID    int64  `json:"provider_id"`
-	UpstreamModel string `json:"upstream_model"`
-	Priority      int    `json:"priority"`
-	Enabled       *bool  `json:"enabled"`
+	ProviderID    int64    `json:"provider_id"`
+	UpstreamModel string   `json:"upstream_model"`
+	Priority      int      `json:"priority"`
+	Enabled       *bool    `json:"enabled"`
+	InputCost     *float64 `json:"input_cost"`  // USD / 1M paid upstream; null = unknown
+	OutputCost    *float64 `json:"output_cost"` //
 }
 
 type modelInput struct {
@@ -256,6 +275,9 @@ func (in *modelInput) validate(creating bool) string {
 			if e.ProviderID == 0 || strings.TrimSpace(e.UpstreamModel) == "" {
 				return "each endpoint needs provider_id and upstream_model"
 			}
+			if (e.InputCost != nil && *e.InputCost < 0) || (e.OutputCost != nil && *e.OutputCost < 0) {
+				return "endpoint costs must be ≥ 0"
+			}
 		}
 	}
 	return ""
@@ -269,7 +291,7 @@ func (in *modelInput) endpoints() []store.Endpoint {
 	for _, e := range *in.Endpoints {
 		enabled := e.Enabled == nil || *e.Enabled
 		out = append(out, store.Endpoint{ProviderID: e.ProviderID, UpstreamModel: strings.TrimSpace(e.UpstreamModel),
-			Priority: e.Priority, Enabled: enabled})
+			Priority: e.Priority, Enabled: enabled, InputCost: e.InputCost, OutputCost: e.OutputCost})
 	}
 	return out
 }
@@ -282,7 +304,7 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]modelJSON, 0, len(ms))
 	for i := range ms {
-		out = append(out, modelDTO(&ms[i]))
+		out = append(out, s.modelDTO(&ms[i]))
 	}
 	ok(w, map[string]any{"data": out})
 }
@@ -323,7 +345,7 @@ func (s *Server) handleCreateModel(w http.ResponseWriter, r *http.Request) {
 		s.modelFail(w, r, err)
 		return
 	}
-	ok(w, map[string]any{"model": modelDTO(created)})
+	ok(w, map[string]any{"model": s.modelDTO(created)})
 }
 
 func (s *Server) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +372,7 @@ func (s *Server) handleUpdateModel(w http.ResponseWriter, r *http.Request) {
 		s.modelFail(w, r, err)
 		return
 	}
-	ok(w, map[string]any{"model": modelDTO(m)})
+	ok(w, map[string]any{"model": s.modelDTO(m)})
 }
 
 func (s *Server) modelFail(w http.ResponseWriter, r *http.Request, err error) {
@@ -420,9 +442,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Name     *string `json:"name"`
-		Role     *string `json:"role"`
-		Disabled *bool   `json:"disabled"`
+		Name         *string        `json:"name"`
+		Role         *string        `json:"role"`
+		Disabled     *bool          `json:"disabled"`
+		RateLimitRPM Optional[*int] `json:"rate_limit_rpm"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -435,7 +458,15 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "you cannot demote or disable yourself")
 		return
 	}
-	u, err := s.store.UpdateUser(r.Context(), id, store.UserUpdate{Name: in.Name, Role: in.Role, Disabled: in.Disabled})
+	upd := store.UserUpdate{Name: in.Name, Role: in.Role, Disabled: in.Disabled}
+	if in.RateLimitRPM.Set {
+		if v := in.RateLimitRPM.Value; v != nil && *v < 0 {
+			writeErr(w, http.StatusBadRequest, "invalid_request", "rate_limit_rpm must be ≥ 0 (0 = unlimited)")
+			return
+		}
+		upd.RateLimitRPM = &in.RateLimitRPM.Value
+	}
+	u, err := s.store.UpdateUser(r.Context(), id, upd)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -478,9 +509,9 @@ func (s *Server) handleAdminLogs(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	out := make([]logJSON, 0, len(logs))
+	out := make([]adminLogJSON, 0, len(logs))
 	for i := range logs {
-		out = append(out, logDTO(&logs[i], true))
+		out = append(out, adminLogDTO(&logs[i]))
 	}
 	paged(w, out, total)
 }

@@ -206,6 +206,12 @@ const toc: { id: string; label: MessageKey }[] = [
   { id: "models", label: "docs.listModels" },
   { id: "key", label: "docs.keyInfo" },
   { id: "embeddings", label: "docs.embeddings" },
+  { id: "limits", label: "docs.limits" },
+];
+
+const LIMIT_ERRORS: { status: string; code: string; text: MessageKey }[] = [
+  { status: "429", code: "rate_limited", text: "docs.limitsRateLimited" },
+  { status: "403", code: "model_not_allowed", text: "docs.limitsModelNotAllowed" },
 ];
 
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
@@ -320,6 +326,34 @@ export function DocsPage() {
             <Endpoint method="POST" path="/v1/embeddings" />
             <p>{t("docs.embeddingsText")}</p>
             <CodeTabs tabs={ex.embeddings} />
+          </Section>
+
+          <Section id="limits" title={t("docs.limits")}>
+            <p>{t("docs.limitsText")}</p>
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full min-w-[480px] border-collapse text-left text-[13px]">
+                <thead className="border-b border-line bg-subtle/60 text-xs text-muted">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">{t("docs.limitsStatus")}</th>
+                    <th className="px-3 py-2 font-medium">{t("docs.limitsCode")}</th>
+                    <th className="px-3 py-2 font-medium">{t("docs.limitsMeaning")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {LIMIT_ERRORS.map((e) => (
+                    <tr key={e.code}>
+                      <td className="px-3 py-2 align-top font-mono text-xs text-fg">{e.status}</td>
+                      <td className="px-3 py-2 align-top">
+                        <InlineCode>{e.code}</InlineCode>
+                      </td>
+                      <td className="px-3 py-2 align-top">{t(e.text)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>{t("docs.limitsRetryAfter")}</p>
+            <CodeBlock lang="http" code={`HTTP/1.1 429 Too Many Requests\nRetry-After: 12\nContent-Type: application/json`} />
           </Section>
         </div>
 

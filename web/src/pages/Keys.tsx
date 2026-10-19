@@ -5,7 +5,7 @@ import { useAuth } from "../auth";
 import { useT } from "../i18n";
 import { useAsync, useDocumentTitle } from "../lib/hooks";
 import { formatDate, formatDateTime, formatRelative, formatUSD, parseNumber } from "../lib/format";
-import type { ApiKey } from "../types";
+import type { ApiKey, PublicModel } from "../types";
 import { Card, Notice, PageHeader } from "../components/Card";
 import { Badge } from "../components/Badge";
 import { Button, IconButton } from "../components/Button";
@@ -13,6 +13,7 @@ import { CopyButton } from "../components/CopyButton";
 import { Dialog, useConfirm } from "../components/Dialog";
 import { EmptyState } from "../components/EmptyState";
 import { Input } from "../components/Input";
+import { ModelMultiSelect } from "../components/ModelMultiSelect";
 import { Toggle } from "../components/Toggle";
 import { useToast } from "../components/Toast";
 import { Table, TBody, THead, Td, Th, TableState, Tr } from "../components/Table";
@@ -24,6 +25,9 @@ export function KeysPage() {
   const confirm = useConfirm();
   useDocumentTitle(t("nav.keys"), config?.name);
   const keys = useAsync(() => api.keys(), []);
+  const [modelsWanted, setModelsWanted] = useState(false);
+  // The model list is only needed by the dialog; load it the first time the dialog opens.
+  const models = useAsync(() => (modelsWanted ? api.models() : Promise.resolve({ data: [] as PublicModel[] })), [modelsWanted]);
   const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState<ApiKey | "new" | null>(null);
   const [secret, setSecret] = useState<{ name: string; secret: string } | null>(null);
@@ -41,6 +45,10 @@ export function KeysPage() {
   }, []);
 
   const list = keys.data?.data ?? [];
+
+  useEffect(() => {
+    if (editing && !modelsWanted) setModelsWanted(true);
+  }, [editing, modelsWanted]);
 
   const replace = (k: ApiKey) => keys.setData((d) => d && { data: d.data.map((x) => (x.id === k.id ? k : x)) });
 
@@ -102,19 +110,21 @@ export function KeysPage() {
             }
           />
         ) : (
-          <Table stickyLast minWidth={880}>
+          <Table stickyLast minWidth={1040}>
             <THead>
               <Th>{t("keys.name")}</Th>
               <Th>{t("keys.key")}</Th>
               <Th align="right">{t("keys.usage")}</Th>
               <Th>{t("keys.limit")}</Th>
+              <Th>{t("keys.rateLimitCol")}</Th>
+              <Th>{t("keys.modelsCol")}</Th>
               <Th>{t("keys.lastUsed")}</Th>
               <Th>{t("common.created")}</Th>
               <Th>{t("common.status")}</Th>
               <Th align="right">{t("common.actions")}</Th>
             </THead>
             <TBody>
-              <TableState colSpan={8} loading={keys.loading} error={keys.error} empty={list.length === 0} onRetry={keys.reload} />
+              <TableState colSpan={10} loading={keys.loading} error={keys.error} empty={list.length === 0} onRetry={keys.reload} />
               {!keys.error &&
                 list.map((k) => (
                   <Tr key={k.id} className={k.disabled ? "opacity-60" : undefined}>
@@ -127,6 +137,22 @@ export function KeysPage() {
                     </Td>
                     <Td>
                       <LimitCell usage={k.usage} limit={k.credit_limit} />
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      {k.rate_limit_rpm ? (
+                        <span className="tabular-nums">{t("keys.rpmValue", { n: k.rate_limit_rpm })}</span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </Td>
+                    <Td className="whitespace-nowrap">
+                      {(k.allowed_models ?? []).length > 0 ? (
+                        <Badge tone="accent" title={k.allowed_models.join("\n")}>
+                          {t("keys.modelsCount", { n: k.allowed_models.length })}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted">{t("keys.allModels")}</span>
+                      )}
                     </Td>
                     <Td className="whitespace-nowrap text-muted" title={k.last_used_at ? formatDateTime(k.last_used_at) : undefined}>
                       {k.last_used_at ? formatRelative(k.last_used_at) : t("keys.never")}
@@ -153,6 +179,9 @@ export function KeysPage() {
 
       <KeyDialog
         target={editing}
+        models={models.data?.data ?? []}
+        modelsLoading={models.loading}
+        modelsError={models.error}
         onClose={() => setEditing(null)}
         onCreated={(r) => {
           keys.setData((d) => ({ data: [r.key, ...(d?.data ?? [])] }));
@@ -210,11 +239,17 @@ function LimitCell({ usage, limit }: { usage: number; limit: number | null }) {
 
 function KeyDialog({
   target,
+  models,
+  modelsLoading,
+  modelsError,
   onClose,
   onCreated,
   onUpdated,
 }: {
   target: ApiKey | "new" | null;
+  models: PublicModel[];
+  modelsLoading: boolean;
+  modelsError?: Error;
   onClose: () => void;
   onCreated: (r: { key: ApiKey; secret: string }) => void;
   onUpdated: (k: ApiKey) => void;
@@ -224,7 +259,9 @@ function KeyDialog({
   const isNew = target === "new";
   const [name, setName] = useState("");
   const [limit, setLimit] = useState("");
-  const [errors, setErrors] = useState<{ name?: string; limit?: string }>({});
+  const [rpm, setRpm] = useState("");
+  const [allowed, setAllowed] = useState<string[]>([]);
+  const [errors, setErrors] = useState<{ name?: string; limit?: string; rpm?: string }>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -233,9 +270,13 @@ function KeyDialog({
     if (target === "new") {
       setName("");
       setLimit("");
+      setRpm("");
+      setAllowed([]);
     } else {
       setName(target.name);
       setLimit(target.credit_limit === null ? "" : String(target.credit_limit));
+      setRpm(target.rate_limit_rpm ? String(target.rate_limit_rpm) : "");
+      setAllowed(target.allowed_models ?? []);
     }
   }, [target]);
 
@@ -244,14 +285,17 @@ function KeyDialog({
     const errs: typeof errors = {};
     if (!name.trim()) errs.name = t("keys.nameRequired");
     if (lim !== null && (Number.isNaN(lim) || lim < 0)) errs.limit = t("keys.limitInvalid");
+    const rate = parseNumber(rpm);
+    if (rate !== null && (Number.isNaN(rate) || rate < 1 || !Number.isInteger(rate))) errs.rpm = t("keys.rpmInvalid");
     setErrors(errs);
     if (Object.keys(errs).length) return;
+    const body = { name: name.trim(), credit_limit: lim, rate_limit_rpm: rate, allowed_models: allowed };
     setBusy(true);
     try {
       if (target === "new") {
-        onCreated(await api.createKey({ name: name.trim(), credit_limit: lim }));
+        onCreated(await api.createKey(body));
       } else if (target) {
-        const r = await api.updateKey(target.id, { name: name.trim(), credit_limit: lim });
+        const r = await api.updateKey(target.id, body);
         onUpdated(r.key);
       }
     } catch (e) {
@@ -292,6 +336,29 @@ function KeyDialog({
           onChange={(e) => setLimit(e.target.value)}
           error={errors.limit}
           hint={t("keys.creditLimitHint")}
+          disabled={busy}
+        />
+        <Input
+          label={t("keys.rateLimit")}
+          type="number"
+          min={1}
+          step={1}
+          inputMode="numeric"
+          placeholder={t("keys.noRateLimit")}
+          value={rpm}
+          onChange={(e) => setRpm(e.target.value)}
+          error={errors.rpm}
+          hint={t("keys.rateLimitHint")}
+          disabled={busy}
+        />
+        <ModelMultiSelect
+          label={t("keys.allowedModels")}
+          hint={t("keys.allowedModelsHint")}
+          models={models}
+          loading={modelsLoading}
+          error={modelsError}
+          value={allowed}
+          onChange={setAllowed}
           disabled={busy}
         />
       </div>

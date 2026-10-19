@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, errorMessage } from "../../api";
 import { useAuth } from "../../auth";
 import { useT, type MessageKey } from "../../i18n";
 import { useAsync, useDocumentTitle } from "../../lib/hooks";
-import { formatDate, formatInt, formatLatency } from "../../lib/format";
+import { formatDate, formatInt, formatLatency, formatPercent } from "../../lib/format";
 import { cx } from "../../lib/cx";
-import { PROVIDER_TYPES, type Provider, type ProviderTestResult, type ProviderType } from "../../types";
+import { PROVIDER_TYPES, type Provider, type ProviderHealthStatus, type ProviderTestResult, type ProviderType } from "../../types";
 import { Card, Notice, PageHeader } from "../../components/Card";
-import { Badge } from "../../components/Badge";
+import { Badge, type BadgeTone } from "../../components/Badge";
 import { Button, IconButton } from "../../components/Button";
 import { Dialog, useConfirm } from "../../components/Dialog";
 import { EmptyState, ErrorState, LoadingState } from "../../components/EmptyState";
@@ -16,6 +16,7 @@ import { Checkbox, Input, SearchInput, Select } from "../../components/Input";
 import { Toggle } from "../../components/Toggle";
 import { useToast } from "../../components/Toast";
 import { Table, TBody, THead, Td, Th, TableState, Tr } from "../../components/Table";
+import { ProviderKeysDialog } from "./ProviderKeys";
 
 export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   openai: "https://api.openai.com/v1",
@@ -29,6 +30,14 @@ export const PROVIDER_TYPE_LABELS: Record<ProviderType, MessageKey> = {
   anthropic: "providers.typeAnthropic",
   gemini: "providers.typeGemini",
   openai_compatible: "providers.typeCompatible",
+};
+
+export const HEALTH: Record<ProviderHealthStatus, { label: MessageKey; tone: BadgeTone }> = {
+  healthy: { label: "providers.healthHealthy", tone: "success" },
+  degraded: { label: "providers.healthDegraded", tone: "warning" },
+  down: { label: "providers.healthDown", tone: "danger" },
+  idle: { label: "providers.healthIdle", tone: "neutral" },
+  no_keys: { label: "providers.healthNoKeys", tone: "danger" },
 };
 
 /** Default slug prefix for imports: provider name lowercased, whitespace → dashes. */
@@ -45,12 +54,26 @@ export function AdminProvidersPage() {
   const providers = useAsync(() => api.admin.providers(), []);
   const [editing, setEditing] = useState<Provider | "new" | null>(null);
   const [importing, setImporting] = useState<Provider | null>(null);
+  const [keysFor, setKeysFor] = useState<Provider | null>(null);
+  const [params, setParams] = useSearchParams();
   const [busyId, setBusyId] = useState<number | null>(null);
   const [testing, setTesting] = useState<number | null>(null);
   const [results, setResults] = useState<Record<number, ProviderTestResult>>({});
 
   const list = providers.data?.data ?? [];
   const replace = (p: Provider) => providers.setData((d) => d && { data: d.data.map((x) => (x.id === p.id ? p : x)) });
+
+  // /admin/providers?keys=<id> (from overview alerts) opens that provider's keys directly.
+  const keysParam = params.get("keys");
+  useEffect(() => {
+    if (!keysParam || !providers.data) return;
+    const p = providers.data.data.find((x) => String(x.id) === keysParam);
+    if (p) setKeysFor(p);
+    const next = new URLSearchParams(params);
+    next.delete("keys");
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keysParam, providers.data]);
 
   const toggle = async (p: Provider, enabled: boolean) => {
     setBusyId(p.id);
@@ -123,19 +146,20 @@ export function AdminProvidersPage() {
             }
           />
         ) : (
-          <Table stickyLast minWidth={1000}>
+          <Table stickyLast minWidth={1240}>
             <THead>
               <Th>{t("providers.name")}</Th>
               <Th>{t("providers.type")}</Th>
               <Th>{t("providers.baseUrl")}</Th>
-              <Th>{t("providers.apiKey")}</Th>
+              <Th>{t("providers.keys")}</Th>
+              <Th>{t("providers.health")}</Th>
               <Th>{t("providers.lastTest")}</Th>
               <Th>{t("common.enabled")}</Th>
               <Th>{t("common.created")}</Th>
               <Th align="right">{t("common.actions")}</Th>
             </THead>
             <TBody>
-              <TableState colSpan={8} loading={providers.loading} error={providers.error} empty={list.length === 0} onRetry={providers.reload} />
+              <TableState colSpan={9} loading={providers.loading} error={providers.error} empty={list.length === 0} onRetry={providers.reload} />
               {!providers.error &&
                 list.map((p) => {
                   const r = results[p.id];
@@ -152,7 +176,12 @@ export function AdminProvidersPage() {
                           </span>
                         )}
                       </Td>
-                      <Td className="font-mono text-xs whitespace-nowrap text-muted">{p.api_key_hint || "—"}</Td>
+                      <Td>
+                        <KeysCell provider={p} onOpen={() => setKeysFor(p)} />
+                      </Td>
+                      <Td>
+                        <HealthCell provider={p} />
+                      </Td>
                       <Td>
                         {testing === p.id ? (
                           <span className="text-xs text-muted">{t("providers.testing")}</span>
@@ -175,11 +204,15 @@ export function AdminProvidersPage() {
                       <Td className="whitespace-nowrap text-muted">{formatDate(p.created_at)}</Td>
                       <Td align="right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button size="xs" icon="play" onClick={() => test(p)} loading={testing === p.id}>
-                            {t("providers.test")}
+                          {/* Labels collapse to icons on phones so the pinned actions column stays narrow. */}
+                          <Button size="xs" icon="play" onClick={() => test(p)} loading={testing === p.id} title={t("providers.test")} aria-label={t("providers.test")}>
+                            <span className="hidden md:inline">{t("providers.test")}</span>
                           </Button>
-                          <Button size="xs" icon="download" onClick={() => setImporting(p)}>
-                            {t("providers.importModels")}
+                          <Button size="xs" icon="key" onClick={() => setKeysFor(p)} title={t("providers.manageKeys")} aria-label={t("providers.manageKeys")}>
+                            <span className="hidden md:inline">{t("providers.keys")}</span>
+                          </Button>
+                          <Button size="xs" icon="download" onClick={() => setImporting(p)} title={t("providers.importModels")} aria-label={t("providers.importModels")}>
+                            <span className="hidden md:inline">{t("providers.importModels")}</span>
                           </Button>
                           <IconButton icon="edit" label={t("common.edit")} onClick={() => setEditing(p)} />
                           <IconButton icon="trash" label={t("common.delete")} onClick={() => remove(p)} disabled={busyId === p.id} className="hover:text-red-600" />
@@ -204,7 +237,46 @@ export function AdminProvidersPage() {
         }}
       />
       <ImportDialog provider={importing} onClose={() => setImporting(null)} />
+      <ProviderKeysDialog provider={keysFor} onClose={() => setKeysFor(null)} onChanged={providers.reload} />
     </>
+  );
+}
+
+function KeysCell({ provider: p, onOpen }: { provider: Provider; onOpen: () => void }) {
+  const t = useT();
+  const total = p.keys_total ?? 0;
+  const active = p.keys_active ?? 0;
+  const warn = active === 0 && (total > 0 || p.health?.status === "no_keys");
+  return (
+    <button type="button" onClick={onOpen} className="flex flex-col items-start gap-1 text-left" title={t("providers.manageKeys")}>
+      <span className="text-[13px] whitespace-nowrap tabular-nums hover:text-accent">{t("providers.keysActive", { active, total })}</span>
+      {warn && <Badge tone="warning">{t("providers.noActiveKeys")}</Badge>}
+    </button>
+  );
+}
+
+function HealthCell({ provider: p }: { provider: Provider }) {
+  const t = useT();
+  const h = p.health;
+  if (!h) return <span className="text-xs text-muted">—</span>;
+  const meta = HEALTH[h.status] ?? HEALTH.idle;
+  const line =
+    h.requests_24h > 0
+      ? [
+          h.success_rate_24h !== null ? formatPercent(h.success_rate_24h) : null,
+          h.avg_latency_ms_24h !== null ? formatLatency(h.avg_latency_ms_24h) : null,
+          t("providers.healthRequests", { n: formatInt(h.requests_24h) }),
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : t("providers.healthNoRequests");
+  return (
+    <div className="flex flex-col items-start gap-1" title={t("providers.healthTooltip")}>
+      <Badge tone={meta.tone} dot>
+        {t(meta.label)}
+      </Badge>
+      <span className="text-[11px] whitespace-nowrap text-muted tabular-nums">{line}</span>
+    </div>
   );
 }
 
@@ -217,7 +289,7 @@ function ProviderDialog({ target, onClose, onSaved }: { target: Provider | "new"
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(true);
-  const [errors, setErrors] = useState<{ name?: string; baseUrl?: string; apiKey?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; baseUrl?: string }>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -245,23 +317,16 @@ function ProviderDialog({ target, onClose, onSaved }: { target: Provider | "new"
     if (!name.trim()) errs.name = t("providers.nameRequired");
     if (compatible && !url) errs.baseUrl = t("providers.baseUrlRequired");
     else if (url && !/^https?:\/\/\S+$/i.test(url)) errs.baseUrl = t("providers.baseUrlInvalid");
-    // A key is required for the hosted providers; self-hosted OpenAI-compatible servers often need none.
-    if (isNew && !compatible && !apiKey.trim()) errs.apiKey = t("providers.apiKeyRequired");
     setErrors(errs);
     if (Object.keys(errs).length) return;
     setBusy(true);
     try {
       if (isNew) {
-        const r = await api.admin.createProvider({ name: name.trim(), type, base_url: url, api_key: apiKey.trim(), enabled });
+        const key = apiKey.trim();
+        const r = await api.admin.createProvider({ name: name.trim(), type, base_url: url, enabled, ...(key ? { api_key: key } : {}) });
         onSaved(r.provider, true);
       } else if (target) {
-        const r = await api.admin.updateProvider(target.id, {
-          name: name.trim(),
-          type,
-          base_url: url,
-          enabled,
-          ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
-        });
+        const r = await api.admin.updateProvider(target.id, { name: name.trim(), type, base_url: url, enabled });
         onSaved(r.provider, false);
       }
     } catch (e) {
@@ -270,8 +335,6 @@ function ProviderDialog({ target, onClose, onSaved }: { target: Provider | "new"
       setBusy(false);
     }
   };
-
-  const keyHint = !isNew && target && target.api_key_hint ? target.api_key_hint : "";
 
   return (
     <Dialog
@@ -313,20 +376,22 @@ function ProviderDialog({ target, onClose, onSaved }: { target: Provider | "new"
           className="font-mono text-[13px]"
           spellCheck={false}
         />
-        <Input
-          label={t("providers.apiKey")}
-          required={isNew && !compatible}
-          type="password"
-          autoComplete="new-password"
-          placeholder={isNew ? "sk-..." : keyHint ? t("providers.apiKeyKeepWithHint", { hint: keyHint }) : t("providers.apiKeyKeep")}
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-          error={errors.apiKey}
-          hint={isNew ? (compatible ? t("providers.apiKeyOptional") : undefined) : t("providers.apiKeyKeep")}
-          disabled={busy}
-          className="font-mono text-[13px]"
-          spellCheck={false}
-        />
+        {isNew ? (
+          <Input
+            label={t("providers.apiKey")}
+            type="password"
+            autoComplete="new-password"
+            placeholder="sk-..."
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            hint={compatible ? t("providers.apiKeyOptional") : t("providers.apiKeyFirst")}
+            disabled={busy}
+            className="font-mono text-[13px]"
+            spellCheck={false}
+          />
+        ) : (
+          <p className="text-xs text-muted">{t("providers.keysManagedHint")}</p>
+        )}
         <div className="flex items-center justify-between gap-4 rounded-lg border border-line px-3 py-2.5">
           <div>
             <div className="text-[13px] font-medium">{t("common.enabled")}</div>

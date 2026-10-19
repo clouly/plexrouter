@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
 	"time"
 )
@@ -31,6 +32,25 @@ type Endpoint struct {
 	UpstreamModel string
 	Priority      int
 	Enabled       bool
+	InputCost     *float64 // USD per 1M tokens paid upstream; nil = unknown
+	OutputCost    *float64
+}
+
+// UpstreamCost is what the operator pays for a request through this
+// endpoint, in nano-USD, or nil if the endpoint has no cost configured.
+func (e *Endpoint) UpstreamCost(prompt, completion int) *int64 {
+	if e.InputCost == nil && e.OutputCost == nil {
+		return nil
+	}
+	var in, out float64
+	if e.InputCost != nil {
+		in = *e.InputCost
+	}
+	if e.OutputCost != nil {
+		out = *e.OutputCost
+	}
+	n := int64(math.Round(float64(prompt)*in*1000 + float64(completion)*out*1000))
+	return &n
 }
 
 var ErrSlugTaken = errors.New("model slug already exists")
@@ -92,7 +112,7 @@ func (s *Store) ListModels(ctx context.Context, enabledOnly bool) ([]Model, erro
 }
 
 func (s *Store) listEndpoints(ctx context.Context, modelID int64, enabledOnly bool) ([]Endpoint, error) {
-	q := `SELECT e.id, e.model_id, e.provider_id, p.name, e.upstream_model, e.priority, e.enabled
+	q := `SELECT e.id, e.model_id, e.provider_id, p.name, e.upstream_model, e.priority, e.enabled, e.input_cost, e.output_cost
 		FROM model_endpoints e JOIN providers p ON p.id = e.provider_id WHERE 1 = 1`
 	var args []any
 	if modelID != 0 {
@@ -110,8 +130,15 @@ func (s *Store) listEndpoints(ctx context.Context, modelID int64, enabledOnly bo
 	var out []Endpoint
 	for rows.Next() {
 		var e Endpoint
-		if err := rows.Scan(&e.ID, &e.ModelID, &e.ProviderID, &e.ProviderName, &e.UpstreamModel, &e.Priority, &e.Enabled); err != nil {
+		var inCost, outCost sql.NullFloat64
+		if err := rows.Scan(&e.ID, &e.ModelID, &e.ProviderID, &e.ProviderName, &e.UpstreamModel, &e.Priority, &e.Enabled, &inCost, &outCost); err != nil {
 			return nil, err
+		}
+		if inCost.Valid {
+			e.InputCost = &inCost.Float64
+		}
+		if outCost.Valid {
+			e.OutputCost = &outCost.Float64
 		}
 		out = append(out, e)
 	}
@@ -232,8 +259,9 @@ func (s *Store) UpdateModel(ctx context.Context, id int64, upd ModelUpdate) (*Mo
 func insertEndpoints(ctx context.Context, tx *sql.Tx, modelID int64, eps []Endpoint) error {
 	for _, e := range eps {
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO model_endpoints (model_id, provider_id, upstream_model, priority, enabled) VALUES (?, ?, ?, ?, ?)`,
-			modelID, e.ProviderID, e.UpstreamModel, e.Priority, boolInt(e.Enabled)); err != nil {
+			`INSERT INTO model_endpoints (model_id, provider_id, upstream_model, priority, enabled, input_cost, output_cost)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			modelID, e.ProviderID, e.UpstreamModel, e.Priority, boolInt(e.Enabled), e.InputCost, e.OutputCost); err != nil {
 			return err
 		}
 	}
@@ -296,6 +324,19 @@ func (s *Store) ImportModels(ctx context.Context, providerID int64, prefix strin
 		return nil
 	})
 	return created, skipped, err
+}
+
+func (s *Store) GetModelBySlug(ctx context.Context, slug string) (*Model, error) {
+	m, err := scanModel(s.db.QueryRowContext(ctx, `SELECT `+modelCols+` FROM models WHERE slug = ?`, slug))
+	if err != nil {
+		return nil, err
+	}
+	return s.GetModel(ctx, m.ID)
+}
+
+// AddEndpoint attaches one more provider endpoint to a model.
+func (s *Store) AddEndpoint(ctx context.Context, modelID int64, e Endpoint) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error { return insertEndpoints(ctx, tx, modelID, []Endpoint{e}) })
 }
 
 func (s *Store) CountModels(ctx context.Context) (models, providers int, err error) {

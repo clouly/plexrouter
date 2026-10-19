@@ -30,6 +30,7 @@ const userNav: NavItem[] = [
 
 const adminNav: NavItem[] = [
   { to: "/admin", label: "nav.adminOverview", icon: "overview", end: true },
+  { to: "/admin/reports", label: "nav.adminReports", icon: "trending" },
   { to: "/admin/providers", label: "nav.adminProviders", icon: "server" },
   { to: "/admin/models", label: "nav.adminModels", icon: "cube" },
   { to: "/admin/users", label: "nav.adminUsers", icon: "users" },

@@ -161,6 +161,35 @@ CREATE TABLE user_identities (
 	UNIQUE (provider, subject),
 	UNIQUE (user_id, provider)
 );
+`, `
+CREATE TABLE provider_keys (
+	id            INTEGER PRIMARY KEY AUTOINCREMENT,
+	provider_id   INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+	name          TEXT    NOT NULL DEFAULT '',
+	key_enc       TEXT    NOT NULL,
+	enabled       INTEGER NOT NULL DEFAULT 1,
+	status        TEXT    NOT NULL DEFAULT 'active',
+	last_error    TEXT    NOT NULL DEFAULT '',
+	last_error_at INTEGER,
+	last_used_at  INTEGER,
+	created_at    INTEGER NOT NULL
+);
+CREATE INDEX provider_keys_provider ON provider_keys(provider_id);
+INSERT INTO provider_keys (provider_id, name, key_enc, created_at)
+	SELECT id, 'Default', api_key_enc, created_at FROM providers WHERE api_key_enc != '';
+UPDATE providers SET api_key_enc = '';
+
+ALTER TABLE model_endpoints ADD COLUMN input_cost REAL;
+ALTER TABLE model_endpoints ADD COLUMN output_cost REAL;
+
+ALTER TABLE request_logs ADD COLUMN upstream_cost INTEGER;
+ALTER TABLE request_logs ADD COLUMN provider_key_id INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE request_logs ADD COLUMN provider_key_name TEXT NOT NULL DEFAULT '';
+CREATE INDEX request_logs_provider_time ON request_logs(provider_id, created_at);
+
+ALTER TABLE api_keys ADD COLUMN rate_limit_rpm INTEGER;
+ALTER TABLE api_keys ADD COLUMN allowed_models TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN rate_limit_rpm INTEGER;
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

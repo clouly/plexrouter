@@ -6,7 +6,7 @@ import { useT } from "../../i18n";
 import { useAsync, useDebounced, useDocumentTitle } from "../../lib/hooks";
 import { formatDate, formatInt, formatUSD, parseNumber } from "../../lib/format";
 import { cx } from "../../lib/cx";
-import type { AdminUser, User } from "../../types";
+import type { AdminUser, AdminUserUpdate, User } from "../../types";
 import { Card, PageHeader } from "../../components/Card";
 import { Badge } from "../../components/Badge";
 import { Button } from "../../components/Button";
@@ -29,6 +29,7 @@ export function AdminUsersPage() {
   const users = useAsync(() => api.admin.users({ page, page_size: pageSize, q: dq || undefined }), [page, pageSize, dq]);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [crediting, setCrediting] = useState<AdminUser | null>(null);
+  const [limiting, setLimiting] = useState<AdminUser | null>(null);
 
   const rows = users.data?.data ?? [];
   const total = users.data?.total ?? 0;
@@ -39,13 +40,15 @@ export function AdminUsersPage() {
     if (me && u.id === me.id) setMe({ ...me, ...u });
   };
 
-  const update = async (u: AdminUser, body: { role?: "admin" | "user"; disabled?: boolean }, success: string) => {
+  const update = async (u: AdminUser, body: AdminUserUpdate, success: string): Promise<boolean> => {
     setBusyId(u.id);
     try {
       merge((await api.admin.updateUser(u.id, body)).user);
       toast.success(success);
+      return true;
     } catch (e) {
       toast.error(errorMessage(e));
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -98,20 +101,23 @@ export function AdminUsersPage() {
           </>
         }
       >
-        <Table stickyLast minWidth={1040}>
+        <Table stickyLast minWidth={1160}>
           <THead>
             <Th>{t("users.user")}</Th>
             <Th>{t("settings.role")}</Th>
             <Th align="right">{t("users.balance")}</Th>
             <Th align="right">{t("users.totalCost")}</Th>
             <Th align="right">{t("dashboard.requests")}</Th>
+            <Th align="right" title={t("users.rpmHint")}>
+              {t("users.rpm")}
+            </Th>
             <Th>{t("common.status")}</Th>
             <Th>{t("users.joined")}</Th>
             <Th align="right">{t("common.actions")}</Th>
           </THead>
           <TBody>
             <TableState
-              colSpan={8}
+              colSpan={9}
               loading={users.loading}
               error={users.error}
               empty={rows.length === 0}
@@ -141,6 +147,17 @@ export function AdminUsersPage() {
                     </Td>
                     <Td align="right">{formatUSD(u.total_cost)}</Td>
                     <Td align="right">{formatInt(u.requests)}</Td>
+                    <Td align="right" className="whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setLimiting(u)}
+                        disabled={busy}
+                        title={t("users.editRpm")}
+                        className="rounded px-1 hover:bg-subtle hover:text-accent"
+                      >
+                        <RpmText rpm={u.rate_limit_rpm} />
+                      </button>
+                    </Td>
                     <Td>
                       <Badge tone={u.disabled ? "danger" : "success"} dot>
                         {u.disabled ? t("common.disabled") : t("common.active")}
@@ -151,6 +168,9 @@ export function AdminUsersPage() {
                       <div className="flex justify-end gap-1">
                         <Button size="xs" icon="wallet" onClick={() => setCrediting(u)} disabled={busy}>
                           {t("users.credits")}
+                        </Button>
+                        <Button size="xs" icon="zap" onClick={() => setLimiting(u)} disabled={busy}>
+                          {t("users.rateLimit")}
                         </Button>
                         <Button size="xs" onClick={() => changeRole(u)} disabled={busy || self} title={self ? t("users.selfHint") : undefined}>
                           {u.role === "admin" ? t("users.makeUser") : t("users.makeAdmin")}
@@ -191,6 +211,13 @@ export function AdminUsersPage() {
         )}
       </Card>
 
+      <RateLimitDialog
+        user={limiting}
+        onClose={() => setLimiting(null)}
+        onSave={async (u, rpm) => {
+          if (await update(u, { rate_limit_rpm: rpm }, t("users.rpmSaved", { email: u.email }))) setLimiting(null);
+        }}
+      />
       <CreditsDialog
         user={crediting}
         onClose={() => setCrediting(null)}
@@ -289,6 +316,86 @@ function CreditsDialog({ user, onClose, onDone }: { user: AdminUser | null; onCl
           <Input label={t("users.note")} placeholder={t("users.notePlaceholder")} value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} maxLength={200} />
         </div>
       )}
+    </Dialog>
+  );
+}
+
+function RpmText({ rpm }: { rpm: number | null | undefined }) {
+  const t = useT();
+  if (rpm === null || rpm === undefined) return <span className="text-muted">{t("users.rpmDefault")}</span>;
+  if (rpm === 0) return <span>{t("users.rpmUnlimited")}</span>;
+  return <span className="tabular-nums">{t("keys.rpmValue", { n: rpm })}</span>;
+}
+
+function RateLimitDialog({
+  user,
+  onClose,
+  onSave,
+}: {
+  user: AdminUser | null;
+  onClose: () => void;
+  onSave: (u: AdminUser, rpm: number | null) => Promise<void>;
+}) {
+  const t = useT();
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    setValue(user.rate_limit_rpm === null || user.rate_limit_rpm === undefined ? "" : String(user.rate_limit_rpm));
+    setError("");
+  }, [user]);
+
+  const submit = async () => {
+    if (!user) return;
+    const n = parseNumber(value);
+    if (n !== null && (Number.isNaN(n) || n < 0 || !Number.isInteger(n))) {
+      setError(t("users.rpmInvalid"));
+      return;
+    }
+    setError("");
+    setBusy(true);
+    try {
+      await onSave(user, n);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={!!user}
+      onClose={onClose}
+      dismissible={!busy}
+      onSubmit={submit}
+      size="sm"
+      title={t("users.rpmTitle")}
+      description={user?.email}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={busy}>
+            {t("common.cancel")}
+          </Button>
+          <Button type="submit" variant="primary" loading={busy}>
+            {t("common.save")}
+          </Button>
+        </>
+      }
+    >
+      <Input
+        label={t("users.rpmLabel")}
+        type="number"
+        min={0}
+        step={1}
+        inputMode="numeric"
+        placeholder={t("users.rpmDefault")}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        error={error || undefined}
+        hint={t("users.rpmHint")}
+        disabled={busy}
+      />
     </Dialog>
   );
 }

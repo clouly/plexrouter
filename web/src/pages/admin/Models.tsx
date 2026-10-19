@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, errorMessage } from "../../api";
 import { useAuth } from "../../auth";
 import { useT } from "../../i18n";
 import { useAsync, useDocumentTitle } from "../../lib/hooks";
-import { formatContext, formatPrice, parseNumber } from "../../lib/format";
+import { formatContext, formatPercent, formatPrice, formatTime, isFuture, parseNumber } from "../../lib/format";
 import { cx } from "../../lib/cx";
-import type { AdminModel, EndpointInput, ModelInput, Provider } from "../../types";
+import type { AdminModel, Endpoint, EndpointInput, ModelInput, Provider } from "../../types";
 import { Card, Notice, PageHeader } from "../../components/Card";
-import { Badge } from "../../components/Badge";
+import { Badge, type BadgeTone } from "../../components/Badge";
 import { Button, IconButton } from "../../components/Button";
 import { CopyButton } from "../../components/CopyButton";
 import { Dialog, useConfirm } from "../../components/Dialog";
@@ -17,8 +18,36 @@ import { Segmented } from "../../components/Segmented";
 import { Toggle } from "../../components/Toggle";
 import { useToast } from "../../components/Toast";
 import { Table, TBody, THead, Td, Th, TableState, Tr } from "../../components/Table";
+import { CatalogImportDialog } from "./CatalogImport";
 
 type StatusFilter = "all" | "enabled" | "disabled";
+
+/** Sell price vs. cost for one side (input or output): 0.2 = +20 %. */
+function markupSide(price: number, cost: number): number {
+  if (cost > 0) return price / cost - 1;
+  return price > 0 ? Infinity : 0;
+}
+
+/**
+ * Markup of a model's sell prices over its cheapest enabled endpoint with known costs
+ * (cheapest = lowest input + output cost). `worst` is the lower of the input/output markups.
+ * Returns null when no enabled endpoint has both costs set.
+ */
+export function modelMarkup(m: AdminModel): { endpoint: Endpoint; input: number; output: number; worst: number } | null {
+  let best: Endpoint | null = null;
+  for (const e of m.endpoints) {
+    if (!e.enabled || e.input_cost == null || e.output_cost == null) continue;
+    if (!best || e.input_cost + e.output_cost < (best.input_cost ?? 0) + (best.output_cost ?? 0)) best = e;
+  }
+  if (!best) return null;
+  const input = markupSide(m.input_price, best.input_cost ?? 0);
+  const output = markupSide(m.output_price, best.output_cost ?? 0);
+  return { endpoint: best, input, output, worst: Math.min(input, output) };
+}
+
+function markupTone(v: number): BadgeTone {
+  return v < 0 ? "danger" : v < 0.05 ? "warning" : "success";
+}
 
 export function AdminModelsPage() {
   const t = useT();
@@ -29,7 +58,9 @@ export function AdminModelsPage() {
   const models = useAsync(() => api.admin.models(), []);
   const providers = useAsync(() => api.admin.providers(), []);
   const [editing, setEditing] = useState<AdminModel | "new" | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [params, setParams] = useSearchParams();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
 
@@ -44,6 +75,18 @@ export function AdminModelsPage() {
   const disabledCount = all.filter((m) => !m.enabled).length;
 
   const replace = (m: AdminModel) => models.setData((d) => d && { data: d.data.map((x) => (x.id === m.id ? m : x)) });
+
+  // /admin/models?edit=<id> (from overview alerts) opens that model's editor.
+  const editParam = params.get("edit");
+  useEffect(() => {
+    if (!editParam || !models.data) return;
+    const m = models.data.data.find((x) => String(x.id) === editParam);
+    if (m) setEditing(m);
+    const next = new URLSearchParams(params);
+    next.delete("edit");
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editParam, models.data]);
 
   const toggle = async (m: AdminModel, enabled: boolean) => {
     setBusyId(m.id);
@@ -83,12 +126,17 @@ export function AdminModelsPage() {
         title={t("adminModels.title")}
         description={t("adminModels.desc")}
         actions={
-          <Button variant="primary" icon="plus" onClick={() => setEditing("new")}>
-            {t("adminModels.add")}
-          </Button>
+          <>
+            <Button icon="plus" onClick={() => setEditing("new")}>
+              {t("adminModels.add")}
+            </Button>
+            <Button variant="primary" icon="download" onClick={() => setCatalogOpen(true)}>
+              {t("catalog.open")}
+            </Button>
+          </>
         }
       />
-      <Notice className="mb-4">{t("adminModels.importHint")}</Notice>
+      <Notice className="mb-4">{t("adminModels.catalogHint")}</Notice>
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput value={q} onChange={setQ} placeholder={t("adminModels.search")} className="flex-1" />
         <Segmented
@@ -109,25 +157,31 @@ export function AdminModelsPage() {
             title={t("adminModels.emptyTitle")}
             description={t("adminModels.emptyDesc")}
             action={
-              <Button size="sm" variant="primary" icon="plus" onClick={() => setEditing("new")}>
-                {t("adminModels.add")}
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button size="sm" variant="primary" icon="download" onClick={() => setCatalogOpen(true)}>
+                  {t("catalog.open")}
+                </Button>
+                <Button size="sm" icon="plus" onClick={() => setEditing("new")}>
+                  {t("adminModels.add")}
+                </Button>
+              </div>
             }
           />
         ) : (
-          <Table stickyLast minWidth={900}>
+          <Table stickyLast minWidth={1000}>
             <THead>
               <Th>{t("adminModels.model")}</Th>
               <Th align="right">{t("models.context")}</Th>
               <Th align="right">{t("adminModels.inputPrice")}</Th>
               <Th align="right">{t("adminModels.outputPrice")}</Th>
+              <Th title={t("adminModels.markupHint")}>{t("adminModels.markup")}</Th>
               <Th>{t("adminModels.endpoints")}</Th>
               <Th>{t("common.enabled")}</Th>
               <Th align="right">{t("common.actions")}</Th>
             </THead>
             <TBody>
               <TableState
-                colSpan={7}
+                colSpan={8}
                 loading={models.loading}
                 error={models.error}
                 empty={list.length === 0}
@@ -138,6 +192,8 @@ export function AdminModelsPage() {
                 list.map((m) => {
                   const unpriced = m.input_price === 0 && m.output_price === 0;
                   const activeEndpoints = m.endpoints.filter((e) => e.enabled).length;
+                  const mk = modelMarkup(m);
+                  const tripped = m.endpoints.filter((e) => isFuture(e.circuit_open_until));
                   return (
                     <Tr key={m.id} className={cx(!m.enabled && "opacity-75")}>
                       <Td>
@@ -160,6 +216,24 @@ export function AdminModelsPage() {
                         </div>
                       </Td>
                       <Td>
+                        {mk ? (
+                          <Badge
+                            tone={markupTone(mk.worst)}
+                            title={t("adminModels.markupTooltip", {
+                              provider: mk.endpoint.provider_name,
+                              input: formatPercent(mk.input, { sign: true, digits: 0 }),
+                              output: formatPercent(mk.output, { sign: true, digits: 0 }),
+                            })}
+                          >
+                            {formatPercent(mk.worst, { sign: true, digits: 0 })}
+                          </Badge>
+                        ) : m.endpoints.length > 0 ? (
+                          <Badge title={t("adminModels.noCostHint")}>{t("adminModels.noCost")}</Badge>
+                        ) : (
+                          <span className="text-xs text-muted">—</span>
+                        )}
+                      </Td>
+                      <Td>
                         <span
                           className={cx("text-[13px] tabular-nums", activeEndpoints === 0 && "text-red-600 dark:text-red-400")}
                           title={m.endpoints.map((e) => `${e.provider_name}: ${e.upstream_model} (p${e.priority}${e.enabled ? "" : ", off"})`).join("\n")}
@@ -168,6 +242,15 @@ export function AdminModelsPage() {
                         </span>
                         {m.endpoints.length > 0 && (
                           <div className="max-w-48 truncate text-[11px] text-muted">{[...new Set(m.endpoints.map((e) => e.provider_name))].join(", ")}</div>
+                        )}
+                        {tripped.length > 0 && (
+                          <Badge
+                            tone="warning"
+                            className="mt-1"
+                            title={tripped.map((e) => `${e.provider_name}: ${e.upstream_model} → ${formatTime(e.circuit_open_until)}`).join("\n")}
+                          >
+                            {t("adminModels.circuitCount", { n: tripped.length })}
+                          </Badge>
                         )}
                       </Td>
                       <Td>
@@ -199,6 +282,14 @@ export function AdminModelsPage() {
           toast.success(isNew ? t("adminModels.created") : t("adminModels.saved"));
         }}
       />
+      <CatalogImportDialog
+        open={catalogOpen}
+        providers={providers.data?.data ?? []}
+        providersLoading={providers.loading}
+        providersError={providers.error}
+        onClose={() => setCatalogOpen(false)}
+        onImported={models.reload}
+      />
     </>
   );
 }
@@ -209,7 +300,12 @@ interface EndpointRow {
   upstream_model: string;
   priority: string;
   enabled: boolean;
+  input_cost: string; // "" = unknown
+  output_cost: string;
+  circuit_open_until: string | null;
 }
+
+const costText = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 
 interface FormErrors {
   slug?: string;
@@ -272,7 +368,16 @@ function ModelDialog({
       setRows(
         [...target.endpoints]
           .sort((a, b) => a.priority - b.priority)
-          .map((e) => ({ key: rowKey++, provider_id: e.provider_id, upstream_model: e.upstream_model, priority: String(e.priority), enabled: e.enabled })),
+          .map((e) => ({
+            key: rowKey++,
+            provider_id: e.provider_id,
+            upstream_model: e.upstream_model,
+            priority: String(e.priority),
+            enabled: e.enabled,
+            input_cost: costText(e.input_cost),
+            output_cost: costText(e.output_cost),
+            circuit_open_until: e.circuit_open_until ?? null,
+          })),
       );
     }
   }, [target]);
@@ -287,6 +392,9 @@ function ModelDialog({
         upstream_model: rs.length === 0 && slug.includes("/") ? slug.slice(slug.indexOf("/") + 1) : "",
         priority: String(rs.length),
         enabled: true,
+        input_cost: "",
+        output_cost: "",
+        circuit_open_until: null,
       },
     ]);
 
@@ -303,13 +411,27 @@ function ModelDialog({
     if (ip === null || Number.isNaN(ip) || ip < 0) errs.input = t("adminModels.priceInvalid");
     if (op === null || Number.isNaN(op) || op < 0) errs.output = t("adminModels.priceInvalid");
     const endpoints: EndpointInput[] = [];
+    const badCost = (v: number | null) => v !== null && (Number.isNaN(v) || v < 0);
     for (const r of rows) {
       const pr = parseNumber(r.priority);
+      const ic = parseNumber(r.input_cost);
+      const oc = parseNumber(r.output_cost);
       if (r.provider_id === "" || !r.upstream_model.trim() || (pr !== null && (Number.isNaN(pr) || !Number.isInteger(pr)))) {
         errs.endpoints = t("adminModels.endpointInvalid");
         break;
       }
-      endpoints.push({ provider_id: r.provider_id, upstream_model: r.upstream_model.trim(), priority: pr ?? 0, enabled: r.enabled });
+      if (badCost(ic) || badCost(oc)) {
+        errs.endpoints = t("adminModels.costInvalid");
+        break;
+      }
+      endpoints.push({
+        provider_id: r.provider_id,
+        upstream_model: r.upstream_model.trim(),
+        priority: pr ?? 0,
+        enabled: r.enabled,
+        input_cost: ic,
+        output_cost: oc,
+      });
     }
     setErrors(errs);
     if (Object.keys(errs).length) return;
@@ -343,7 +465,7 @@ function ModelDialog({
       onClose={onClose}
       dismissible={!busy}
       onSubmit={submit}
-      size="lg"
+      size="xl"
       title={isNew ? t("adminModels.addTitle") : t("adminModels.editTitle")}
       footer={
         <>
@@ -441,22 +563,25 @@ function ModelDialog({
             <div className="rounded-lg border border-dashed border-line px-3 py-5 text-center text-[13px] text-muted">{t("adminModels.noEndpoints")}</div>
           ) : (
             <div className="flex flex-col gap-2">
-              <div className="hidden grid-cols-[minmax(0,11rem)_minmax(0,1fr)_5rem_2.5rem_2rem] gap-2 px-0.5 text-[11px] font-medium text-muted sm:grid">
+              <div className="hidden grid-cols-[minmax(0,10rem)_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_2.5rem_2rem] gap-2 px-0.5 text-[11px] font-medium text-muted sm:grid">
                 <span>{t("adminModels.provider")}</span>
                 <span>{t("adminModels.upstreamModel")}</span>
+                <span title={t("adminModels.costHint")}>{t("adminModels.costIn")}</span>
+                <span title={t("adminModels.costHint")}>{t("adminModels.costOut")}</span>
                 <span>{t("adminModels.priority")}</span>
                 <span>{t("adminModels.on")}</span>
                 <span />
               </div>
               {rows.map((r) => {
                 const known = r.provider_id === "" || providers.some((p) => p.id === r.provider_id);
+                const circuit = isFuture(r.circuit_open_until);
                 return (
                   <div
                     key={r.key}
-                    className="grid grid-cols-[minmax(0,1fr)_5rem_auto_auto] items-center gap-2 rounded-lg border border-line p-2 sm:grid-cols-[minmax(0,11rem)_minmax(0,1fr)_5rem_2.5rem_2rem] sm:border-0 sm:p-0"
+                    className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_4.5rem_auto_auto] items-center gap-2 rounded-lg border border-line p-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_5.5rem_5.5rem_4.5rem_2.5rem_2rem] sm:border-0 sm:p-0"
                   >
                     <select
-                      className={cx(controlClass, "col-span-4 h-8 text-[13px] sm:col-span-1")}
+                      className={cx(controlClass, "col-span-5 h-8 text-[13px] sm:col-span-1")}
                       value={r.provider_id}
                       onChange={(e) => updateRow(r.key, { provider_id: e.target.value ? Number(e.target.value) : "" })}
                       disabled={busy}
@@ -472,13 +597,39 @@ function ModelDialog({
                       ))}
                     </select>
                     <input
-                      className={cx(controlClass, "h-8 font-mono text-[13px]")}
+                      className={cx(controlClass, "col-span-5 h-8 font-mono text-[13px] sm:col-span-1")}
                       placeholder={t("adminModels.upstreamPlaceholder")}
                       value={r.upstream_model}
                       onChange={(e) => updateRow(r.key, { upstream_model: e.target.value })}
                       disabled={busy}
                       aria-label={t("adminModels.upstreamModel")}
                       spellCheck={false}
+                    />
+                    <input
+                      className={cx(controlClass, "h-8 px-2 text-[13px]")}
+                      type="number"
+                      min={0}
+                      step="any"
+                      inputMode="decimal"
+                      placeholder={t("adminModels.costIn")}
+                      value={r.input_cost}
+                      onChange={(e) => updateRow(r.key, { input_cost: e.target.value })}
+                      disabled={busy}
+                      aria-label={t("adminModels.costIn")}
+                      title={t("adminModels.costHint")}
+                    />
+                    <input
+                      className={cx(controlClass, "h-8 px-2 text-[13px]")}
+                      type="number"
+                      min={0}
+                      step="any"
+                      inputMode="decimal"
+                      placeholder={t("adminModels.costOut")}
+                      value={r.output_cost}
+                      onChange={(e) => updateRow(r.key, { output_cost: e.target.value })}
+                      disabled={busy}
+                      aria-label={t("adminModels.costOut")}
+                      title={t("adminModels.costHint")}
                     />
                     <input
                       className={cx(controlClass, "h-8 text-[13px]")}
@@ -492,10 +643,19 @@ function ModelDialog({
                     />
                     <Toggle size="sm" checked={r.enabled} onChange={(v) => updateRow(r.key, { enabled: v })} disabled={busy} label={t("common.enabled")} />
                     <IconButton icon="trash" label={t("common.remove")} onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} disabled={busy} className="hover:text-red-600" />
+                    {circuit && (
+                      <div className="col-span-full -mt-1 sm:mt-0">
+                        <Badge tone="warning" dot title={t("adminModels.circuitHint")}>
+                          {t("adminModels.circuitOpen", { time: formatTime(r.circuit_open_until) })}
+                        </Badge>
+                      </div>
+                    )}
                   </div>
                 );
               })}
-              <p className="text-[11px] text-muted">{t("adminModels.priorityHint")}</p>
+              <p className="text-[11px] text-muted">
+                {t("adminModels.priorityHint")} {t("adminModels.costHint")}
+              </p>
             </div>
           )}
         </div>

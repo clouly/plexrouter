@@ -3,35 +3,37 @@ package server
 import (
 	"time"
 
-	"github.com/local4a/plexrouter/internal/secure"
 	"github.com/local4a/plexrouter/internal/store"
 )
 
 // JSON shapes of the console API (see docs/console-api.md). Money is USD.
 
 type userJSON struct {
-	ID        int64     `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name"`
-	Role      string    `json:"role"`
-	Balance   float64   `json:"balance"`
-	Disabled  bool      `json:"disabled"`
-	CreatedAt time.Time `json:"created_at"`
+	ID           int64     `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	Role         string    `json:"role"`
+	Balance      float64   `json:"balance"`
+	Disabled     bool      `json:"disabled"`
+	RateLimitRPM *int      `json:"rate_limit_rpm"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 func userDTO(u *store.User) userJSON {
-	return userJSON{u.ID, u.Email, u.Name, u.Role, store.ToUSD(u.Balance), u.Disabled, u.CreatedAt}
+	return userJSON{u.ID, u.Email, u.Name, u.Role, store.ToUSD(u.Balance), u.Disabled, u.RateLimitRPM, u.CreatedAt}
 }
 
 type keyJSON struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	Prefix      string     `json:"prefix"`
-	CreditLimit *float64   `json:"credit_limit"`
-	Usage       float64    `json:"usage"`
-	Disabled    bool       `json:"disabled"`
-	CreatedAt   time.Time  `json:"created_at"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
+	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
+	Prefix        string     `json:"prefix"`
+	CreditLimit   *float64   `json:"credit_limit"`
+	Usage         float64    `json:"usage"`
+	RateLimitRPM  *int       `json:"rate_limit_rpm"`
+	AllowedModels []string   `json:"allowed_models"`
+	Disabled      bool       `json:"disabled"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastUsedAt    *time.Time `json:"last_used_at"`
 }
 
 func keyDTO(k *store.APIKey) keyJSON {
@@ -40,36 +42,19 @@ func keyDTO(k *store.APIKey) keyJSON {
 		v := store.ToUSD(*k.CreditLimit)
 		limit = &v
 	}
-	return keyJSON{k.ID, k.Name, k.Prefix, limit, store.ToUSD(k.Usage), k.Disabled, k.CreatedAt, k.LastUsedAt}
-}
-
-type providerJSON struct {
-	ID         int64     `json:"id"`
-	Name       string    `json:"name"`
-	Type       string    `json:"type"`
-	BaseURL    string    `json:"base_url"`
-	APIKeyHint string    `json:"api_key_hint"`
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
-func providerDTO(p *store.Provider, box *secure.Box) providerJSON {
-	hint := ""
-	if key, err := box.Decrypt(p.APIKeyEnc); err == nil {
-		hint = secure.Mask(key)
-	} else {
-		hint = "(unreadable)"
-	}
-	return providerJSON{p.ID, p.Name, p.Type, p.BaseURL, hint, p.Enabled, p.CreatedAt}
+	return keyJSON{k.ID, k.Name, k.Prefix, limit, store.ToUSD(k.Usage), k.RateLimitRPM, k.AllowedModels, k.Disabled, k.CreatedAt, k.LastUsedAt}
 }
 
 type endpointJSON struct {
-	ID            int64  `json:"id"`
-	ProviderID    int64  `json:"provider_id"`
-	ProviderName  string `json:"provider_name"`
-	UpstreamModel string `json:"upstream_model"`
-	Priority      int    `json:"priority"`
-	Enabled       bool   `json:"enabled"`
+	ID               int64      `json:"id"`
+	ProviderID       int64      `json:"provider_id"`
+	ProviderName     string     `json:"provider_name"`
+	UpstreamModel    string     `json:"upstream_model"`
+	Priority         int        `json:"priority"`
+	Enabled          bool       `json:"enabled"`
+	InputCost        *float64   `json:"input_cost"`
+	OutputCost       *float64   `json:"output_cost"`
+	CircuitOpenUntil *time.Time `json:"circuit_open_until"`
 }
 
 type modelJSON struct {
@@ -85,10 +70,11 @@ type modelJSON struct {
 	Endpoints     []endpointJSON `json:"endpoints"`
 }
 
-func modelDTO(m *store.Model) modelJSON {
+func (s *Server) modelDTO(m *store.Model) modelJSON {
 	eps := make([]endpointJSON, 0, len(m.Endpoints))
 	for _, e := range m.Endpoints {
-		eps = append(eps, endpointJSON{e.ID, e.ProviderID, e.ProviderName, e.UpstreamModel, e.Priority, e.Enabled})
+		eps = append(eps, endpointJSON{e.ID, e.ProviderID, e.ProviderName, e.UpstreamModel, e.Priority, e.Enabled,
+			e.InputCost, e.OutputCost, s.gw.EndpointOpenUntil(e.ID)})
 	}
 	return modelJSON{m.ID, m.Slug, m.Name, m.Description, m.ContextLength, m.InputPrice, m.OutputPrice, m.Enabled, m.CreatedAt, eps}
 }
@@ -119,11 +105,24 @@ type logJSON struct {
 	UserEmail        string    `json:"user_email,omitempty"`
 }
 
-func logDTO(l *store.RequestLog, withEmail bool) logJSON {
-	j := logJSON{l.ID, l.Model, l.ProviderName, l.APIKeyName, l.PromptTokens, l.CompletionTokens,
+func logDTO(l *store.RequestLog) logJSON {
+	return logJSON{l.ID, l.Model, l.ProviderName, l.APIKeyName, l.PromptTokens, l.CompletionTokens,
 		store.ToUSD(l.Cost), l.LatencyMS, l.Status, l.Error, l.Stream, l.CreatedAt, ""}
-	if withEmail {
-		j.UserEmail = l.UserEmail
+}
+
+// adminLogJSON adds what only operators may see.
+type adminLogJSON struct {
+	logJSON
+	UpstreamCost *float64 `json:"upstream_cost"`
+	ProviderKey  string   `json:"provider_key"`
+}
+
+func adminLogDTO(l *store.RequestLog) adminLogJSON {
+	j := adminLogJSON{logJSON: logDTO(l), ProviderKey: l.ProviderKeyName}
+	j.UserEmail = l.UserEmail
+	if l.UpstreamCost != nil {
+		v := store.ToUSD(*l.UpstreamCost)
+		j.UpstreamCost = &v
 	}
 	return j
 }

@@ -111,6 +111,7 @@ type oauthEnv struct {
 	base string
 	cfg  *config.Config
 	st   *store.Store
+	srv  *server.Server
 }
 
 func newOAuthEnv(t *testing.T, idp *fakeIdP) *oauthEnv {
@@ -124,12 +125,12 @@ func newOAuthEnv(t *testing.T, idp *fakeIdP) *oauthEnv {
 	box, _ := secure.NewBox("test-secret")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	web := fstest.MapFS{"index.html": {Data: []byte("<html>console</html>")}}
-	srv := server.New(cfg, st, box, gateway.New(st, box, cfg.RequestTimeout, log), web, "test", log)
+	srv := server.New(cfg, st, box, gateway.New(st, box, gateway.Options{Timeout: cfg.RequestTimeout}, log), web, "test", log)
 	srv.SetOAuthProvider(idp.provider(oauth.Google))
 	srv.SetOAuthProvider(idp.provider(oauth.GitHub))
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &oauthEnv{t: t, base: hs.URL, cfg: cfg, st: st}
+	return &oauthEnv{t: t, base: hs.URL, cfg: cfg, st: st, srv: srv}
 }
 
 // browser is a cookie-keeping client that does not follow redirects.

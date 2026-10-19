@@ -16,6 +16,7 @@ import { SettingsPage } from "./pages/Settings";
 import { NotFoundPage } from "./pages/NotFound";
 import { AdminOverviewPage } from "./pages/admin/Overview";
 import { AdminProvidersPage } from "./pages/admin/Providers";
+import { AdminReportsPage } from "./pages/admin/Reports";
 import { AdminModelsPage } from "./pages/admin/Models";
 import { AdminUsersPage } from "./pages/admin/Users";
 import { AdminLogsPage } from "./pages/admin/Logs";
@@ -75,6 +76,7 @@ export function App() {
         <Route path="settings" element={auth(<SettingsPage />)} />
         <Route path="admin">
           <Route index element={admin(<AdminOverviewPage />)} />
+          <Route path="reports" element={admin(<AdminReportsPage />)} />
           <Route path="providers" element={admin(<AdminProvidersPage />)} />
           <Route path="models" element={admin(<AdminModelsPage />)} />
           <Route path="users" element={admin(<AdminUsersPage />)} />

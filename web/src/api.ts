@@ -1,20 +1,27 @@
 import { translateErrorCode } from "./i18n";
 import type {
   AdminModel,
+  AdminReport,
   AdminStats,
   AdminUser,
+  AdminUserUpdate,
   ApiKey,
   AppConfig,
+  CatalogImportInput,
+  CatalogImportResult,
+  CatalogModel,
+  KeyInput,
   Identity,
   OAuthProvider,
   ModelInput,
   Paginated,
   Provider,
   ProviderInput,
+  ProviderKey,
   ProviderTestResult,
+  ProviderUpdate,
   PublicModel,
   RedeemCode,
-  Role,
   Transaction,
   UsageLog,
   UsageStats,
@@ -95,9 +102,8 @@ export const api = {
 
   // Keys
   keys: () => get<{ data: ApiKey[] }>("/api/keys"),
-  createKey: (body: { name: string; credit_limit?: number | null }) => post<{ key: ApiKey; secret: string }>("/api/keys", body),
-  updateKey: (id: number, body: { name?: string; credit_limit?: number | null; disabled?: boolean }) =>
-    patch<{ key: ApiKey }>(`/api/keys/${id}`, body),
+  createKey: (body: KeyInput & { name: string }) => post<{ key: ApiKey; secret: string }>("/api/keys", body),
+  updateKey: (id: number, body: KeyInput) => patch<{ key: ApiKey }>(`/api/keys/${id}`, body),
   deleteKey: (id: number) => del<Ok>(`/api/keys/${id}`),
 
   // Usage & credits
@@ -109,9 +115,16 @@ export const api = {
   // Admin
   admin: {
     stats: () => get<AdminStats>("/api/admin/stats"),
+    report: (days: number) => get<AdminReport>("/api/admin/report", { days }),
     providers: () => get<{ data: Provider[] }>("/api/admin/providers"),
     createProvider: (body: ProviderInput) => post<{ provider: Provider }>("/api/admin/providers", body),
-    updateProvider: (id: number, body: Partial<ProviderInput>) => patch<{ provider: Provider }>(`/api/admin/providers/${id}`, body),
+    updateProvider: (id: number, body: ProviderUpdate) => patch<{ provider: Provider }>(`/api/admin/providers/${id}`, body),
+    providerKeys: (id: number) => get<{ data: ProviderKey[] }>(`/api/admin/providers/${id}/keys`),
+    addProviderKeys: (id: number, body: { api_keys: string[]; name?: string }) =>
+      post<{ data: ProviderKey[] }>(`/api/admin/providers/${id}/keys`, body),
+    updateProviderKey: (id: number, keyId: number, body: { name?: string; enabled?: boolean }) =>
+      patch<{ key: ProviderKey }>(`/api/admin/providers/${id}/keys/${keyId}`, body),
+    deleteProviderKey: (id: number, keyId: number) => del<Ok>(`/api/admin/providers/${id}/keys/${keyId}`),
     deleteProvider: (id: number) => del<Ok>(`/api/admin/providers/${id}`),
     testProvider: (id: number) => post<ProviderTestResult>(`/api/admin/providers/${id}/test`),
     upstreamModels: (id: number) => get<{ data: { id: string }[] }>(`/api/admin/providers/${id}/upstream-models`),
@@ -121,8 +134,10 @@ export const api = {
     deleteModel: (id: number) => del<Ok>(`/api/admin/models/${id}`),
     importModels: (body: { provider_id: number; upstream_models: string[]; slug_prefix: string }) =>
       post<{ created: number; skipped: number }>("/api/admin/models/import", body),
+    catalog: (providerId?: number) => get<{ data: CatalogModel[]; fetched_at: string }>("/api/admin/catalog", { provider_id: providerId }),
+    importCatalog: (body: CatalogImportInput) => post<CatalogImportResult>("/api/admin/catalog/import", body),
     users: (q: PageQuery & { q?: string }) => get<Paginated<AdminUser>>("/api/admin/users", q),
-    updateUser: (id: number, body: { name?: string; role?: Role; disabled?: boolean }) => patch<{ user: User }>(`/api/admin/users/${id}`, body),
+    updateUser: (id: number, body: AdminUserUpdate) => patch<{ user: User }>(`/api/admin/users/${id}`, body),
     adjustCredits: (id: number, body: { amount: number; note?: string }) => post<{ user: User }>(`/api/admin/users/${id}/credits`, body),
     logs: (q: PageQuery & { user_id?: number; model?: string }) => get<Paginated<UsageLog>>("/api/admin/logs", q),
     redeemCodes: (q: PageQuery) => get<Paginated<RedeemCode>>("/api/admin/redeem-codes", q),
