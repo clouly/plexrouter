@@ -35,7 +35,7 @@ internal/store/     SQLite persistence and migrations
 internal/provider/  upstream adapters (OpenAI-compatible, Anthropic, Gemini) and format conversion
 internal/gateway/   /v1 API: auth, routing, key pools, failover, limits, billing, Messages API
 internal/server/    console JSON API, OAuth sign-in, embedded console
-internal/catalog/   OpenRouter model catalog import
+internal/catalog/   public model catalog import
 web/                React + Vite + Tailwind console
 docs/               console API contract (docs/console-api.md)
 ```

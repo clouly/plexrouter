@@ -1,4 +1,4 @@
-// Package catalog fetches OpenRouter's public model list, used as a reference
+// Package catalog fetches a public model catalog, used as a reference
 // (names, context lengths, prices) when an operator imports models.
 package catalog
 
@@ -135,7 +135,7 @@ func normalize(id string) string {
 }
 
 // Match finds the upstream model that serves a catalog model, comparing names
-// without the vendor prefix and treating "." and "-" alike (OpenRouter's
+// without the vendor prefix and treating "." and "-" alike (the catalog's
 // "anthropic/claude-sonnet-4.5" is Anthropic's "claude-sonnet-4-5"). An exact
 // match wins; otherwise the newest dated snapshot ("…-20250929") is used.
 func Match(catalogID string, upstream []string) string {

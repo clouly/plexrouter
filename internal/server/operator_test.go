@@ -66,7 +66,7 @@ func fakeCatalog(t *testing.T) string {
 		io.WriteString(w, `{"data":[
 			{"id":"openai/gpt-test","name":"GPT Test","description":"d","context_length":128000,"pricing":{"prompt":"0.000001","completion":"0.000002"}},
 			{"id":"anthropic/claude-x","name":"Claude X","context_length":200000,"pricing":{"prompt":"0.000003","completion":"0.000015"}},
-			{"id":"openrouter/auto","name":"Auto","pricing":{"prompt":"-1","completion":"-1"}}]}`)
+			{"id":"vendor/auto","name":"Auto","pricing":{"prompt":"-1","completion":"-1"}}]}`)
 	}))
 	t.Cleanup(s.Close)
 	return s.URL

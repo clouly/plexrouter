@@ -33,12 +33,12 @@ type ChatRequest struct {
 	ResponseFormat      *ResponseFormat `json:"response_format"`
 	User                string          `json:"user"`
 	ReasoningEffort     string          `json:"reasoning_effort"` // OpenAI style
-	Reasoning           *Reasoning      `json:"reasoning"`        // OpenRouter style
+	Reasoning           *Reasoning      `json:"reasoning"`
 
 	Raw Object `json:"-"`
 }
 
-// Reasoning is OpenRouter's reasoning control.
+// Reasoning is the unified reasoning control.
 type Reasoning struct {
 	Effort    string `json:"effort"`
 	MaxTokens *int   `json:"max_tokens"`

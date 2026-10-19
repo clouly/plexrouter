@@ -39,7 +39,7 @@ All notable changes to PlexRouter are listed here. The format follows [Keep a Ch
 - **Provider key pools**: several upstream keys per provider, rotated; keys that are rejected or out of credit are switched off automatically, rate-limited keys cool down.
 - **Failover**: a circuit breaker skips failing endpoints; provider health over the last 24 hours.
 - **Operator reports**: upstream cost per endpoint, revenue/cost/profit by day, model and provider; alerts on the admin overview.
-- **Catalog import** from OpenRouter's public model list with name matching and a markup percentage.
+- **Catalog import** from a public model catalog with name matching and a markup percentage.
 - **Limits**: requests-per-minute per user (`PLEXROUTER_DEFAULT_USER_RPM`) and per key; keys can be restricted to a list of models.
 - **Sign in with Google / GitHub**, with linking of accounts by verified email.
 - **Console in 10 languages**: English, 简体中文, 繁體中文, 日本語, 한국어, Español, Français, Deutsch, Português (Brasil), Русский.

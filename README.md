@@ -4,8 +4,6 @@
 
 [简体中文](README.zh-CN.md)
 
-> PlexRouter is an independent open-source project inspired by services like OpenRouter. It is not affiliated with OpenRouter, Inc.
-
 ## Features
 
 - **One API for every model** — `POST /v1/chat/completions` in the OpenAI format (streaming, tools/function calling, images, JSON mode), `/v1/embeddings`, `/v1/models`. Works with the official OpenAI SDKs and anything that speaks the OpenAI API.
@@ -13,7 +11,7 @@
 - **Native adapters** — requests are translated to the Anthropic Messages API and the Gemini API (including tool calls and streaming); OpenAI-compatible upstreams get a pass-through that preserves extra fields. Reasoning effort, prompt caching (`cache_control`) and structured outputs are mapped across providers, and cached tokens are billed at cache prices.
 - **Routing and fallback** — each model (`openai/gpt-4o`) can be served by several providers, tried in priority order. Clients can also pass `models: [...]` to fall back to other models. Fallback happens transparently before the first byte is sent.
 - **Credits and billing** — prices per 1M input/output tokens per model; every request is charged exactly (nano-dollar precision) from the account balance. Per-key credit limits, redeem codes, admin adjustments, signup bonus.
-- **Built for operators** — your users never touch provider keys. Pools of upstream keys per provider with rotation; keys that are rejected or run out of credit are switched off automatically, rate-limited ones cool down, and failing endpoints are skipped by a circuit breaker. Track upstream cost next to revenue for profit reports, see provider health and alerts, and import models with reference prices from the OpenRouter catalog with your own markup.
+- **Built for operators** — your users never touch provider keys. Pools of upstream keys per provider with rotation; keys that are rejected or run out of credit are switched off automatically, rate-limited ones cool down, and failing endpoints are skipped by a circuit breaker. Track upstream cost next to revenue for profit reports, see provider health and alerts, and import models with reference prices from a public model catalog with your own markup.
 - **Limits** — requests-per-minute limits per user (with a server default) and per key; keys can be restricted to a list of models.
 - **Sign in with Google / GitHub** — no passwords to manage; accounts are created on first sign-in and linked by verified email.
 - **Web console** — users manage API keys, see usage, logs and spend charts, browse the model catalog and docs; admins manage providers (with connection test and one-click model import), models and endpoints, users, request logs and redeem codes. 10 languages (English, 简体中文, 繁體中文, 日本語, 한국어, Español, Français, Deutsch, Português, Русский), light and dark.
@@ -92,7 +90,7 @@ for chunk in stream:
         print(chunk.choices[0].delta.content or "", end="")
 ```
 
-The base URL is also served at `/api/v1`, so tools that expect an OpenRouter-style URL work too.
+The base URL is also served at `/api/v1`, for clients that use that path.
 
 | Endpoint | Description |
 |---|---|
@@ -156,7 +154,7 @@ A Google or GitHub account is linked to an existing PlexRouter account automatic
 - **Provider keys**: add several keys per provider (Admin → Providers → Keys); requests rotate across them. A key that gets `401`/an invalid-key error is marked *auth failed*, and one that reports no credit/quota is marked *quota exceeded*. Both stop being used until you re-enable them. A `429` puts a key on a short cooldown (honouring `Retry-After`).
 - **Failover**: when an endpoint fails 3 times in a row (5xx, timeouts), it is skipped for 30 s, doubling up to 5 min, while other endpoints of the model take over. Health over the last 24 h is shown per provider.
 - **Alerts**: the admin overview lists failed keys, providers without a usable key or with a low success rate, enabled models nobody can serve, and paid models without a cost.
-- **Catalog import**: Admin → Models → *Import from catalog* loads OpenRouter's public model list, matches it against a provider's models (e.g. `anthropic/claude-sonnet-4.5` ↔ `claude-sonnet-4-5-20250929`), and creates models priced at reference × (1 + markup). The server needs outbound access to `openrouter.ai`.
+- **Catalog import**: Admin → Models → *Import from catalog* loads a public model catalog, matches it against a provider's models (e.g. `anthropic/claude-sonnet-4.5` ↔ `claude-sonnet-4-5-20250929`), and creates models priced at reference × (1 + markup). The server needs outbound internet access to fetch it.
 - Circuit breakers, cooldowns and rate limits are kept in memory, so they reset when the server restarts.
 
 ## Project layout
@@ -185,7 +183,7 @@ make test       # Go tests (end-to-end against fake upstreams)
 - Online payments (Stripe, etc.)
 - More providers: Azure OpenAI, AWS Bedrock, Vertex AI
 - Weighted load balancing and price/latency-based routing
-- OpenRouter-style routing parameters (`provider.order`, `sort`, `allow_fallbacks`) and a generation-stats endpoint
+- Per-request routing parameters (`provider.order`, `sort`, `allow_fallbacks`) and a generation-stats endpoint
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md), and please open an issue to discuss larger changes first. Report security problems privately as described in [SECURITY.md](SECURITY.md). What changed in each version, including upgrade notes, is in [CHANGELOG.md](CHANGELOG.md).
 

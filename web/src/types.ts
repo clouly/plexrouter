@@ -246,7 +246,7 @@ export interface Alert {
   key_id?: number;
 }
 
-/** Model from the public OpenRouter catalog, used as a reference for importing. */
+/** Model from the public model catalog, used as a reference for importing. */
 export interface CatalogModel {
   id: string;
   name: string;

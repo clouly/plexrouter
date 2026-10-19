@@ -21,7 +21,7 @@ type Filter = "all" | "matched" | "new";
 const sell = (ref: number, markup: number) => Math.round(ref * (1 + markup / 100) * 1e6) / 1e6;
 
 /**
- * "Import from catalog": pick models from the public OpenRouter list (fetched by the server),
+ * "Import from catalog": pick models from the public model catalog (fetched by the server),
  * map each to one of the provider's upstream models, and create them with a markup over the
  * reference price.
  */

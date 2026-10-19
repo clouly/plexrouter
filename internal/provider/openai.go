@@ -12,7 +12,7 @@ import (
 type openAI struct {
 	httpClient
 	// official is the OpenAI API itself, which rejects fields it doesn't
-	// know; compatible servers get the body as sent (some, like OpenRouter,
+	// know; compatible servers get the body as sent (some
 	// understand "reasoning" and "cache_control").
 	official bool
 }

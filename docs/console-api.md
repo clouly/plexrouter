@@ -156,7 +156,7 @@ type SystemSettings = {
 
 type DailyStat = { date: string /* YYYY-MM-DD */; requests: number; tokens: number; cost: number };
 
-// Model from the public OpenRouter catalog, used as a reference for importing.
+// Model from the public model catalog, used as a reference for importing.
 type CatalogModel = {
   id: string;                // e.g. "openai/gpt-4o" — becomes our slug
   name: string; description: string; context_length: number;
@@ -258,7 +258,7 @@ The console should show a localized message for these `error.code` values and fa
 | PATCH | `/api/admin/models/{id}` | same fields, all optional; if `endpoints` is present it **replaces** the list | `{ model: AdminModel }` |
 | DELETE | `/api/admin/models/{id}` | | `{ ok: true }` |
 | POST | `/api/admin/models/import` | `{ provider_id, upstream_models: string[], slug_prefix: string }` | `{ created: number, skipped: number }` — creates disabled models `slug_prefix/upstream` with price 0; existing slugs get the endpoint added instead |
-| GET | `/api/admin/catalog` | `provider_id?` | `{ data: CatalogModel[], fetched_at: string }` — the public OpenRouter model list (cached ~10 min, fetched by the server). With `provider_id`, `upstream_match` is filled by matching against that provider's model list. `502 catalog_unavailable` if it can't be fetched |
+| GET | `/api/admin/catalog` | `provider_id?` | `{ data: CatalogModel[], fetched_at: string }` — the public model catalog (cached ~10 min, fetched by the server). With `provider_id`, `upstream_match` is filled by matching against that provider's model list. `502 catalog_unavailable` if it can't be fetched |
 | POST | `/api/admin/catalog/import` | `{ provider_id, items: { id: string, upstream_model: string }[], markup_percent: number /* e.g. 20 = sell at 1.2× reference */, enable: boolean, update_existing: boolean }` | `{ created, updated, endpoints_added }` — new models get the catalog name/description/context and sell price = reference × (1 + markup/100); the endpoint's cost is set to the reference price. Existing slugs: the endpoint is added if missing; with `update_existing` their sell prices and metadata are refreshed too |
 | GET | `/api/admin/users` | `page, page_size, q?` (email/name search) | `{ data: (User & { total_cost: number, requests: number })[], total }` |
 | PATCH | `/api/admin/users/{id}` | `{ name?, role?, disabled?, rate_limit_rpm?: number \| null }` | `{ user: User }` |
@@ -277,7 +277,7 @@ The console should show a localized message for these `error.code` values and fa
 - `POST /v1/messages` — **Anthropic Messages API** (for Claude Code and Anthropic SDKs). Auth with `x-api-key: sk-plex-…` or `Authorization: Bearer sk-plex-…`. Works with any provider: Anthropic upstreams get the request as-is (incl. `anthropic-beta`, thinking, `cache_control`); other providers are translated to and from OpenAI format. Streaming supported. `POST /v1/messages/count_tokens` is also served (exact for Anthropic upstreams, estimated otherwise).
   Claude Code: `ANTHROPIC_BASE_URL=<origin>` and `ANTHROPIC_AUTH_TOKEN=sk-plex-…` (Claude Code appends `/v1/messages`), optionally `ANTHROPIC_MODEL=<model id>`.
 - **Model names**: besides the exact id (`anthropic/claude-sonnet-4.5`), requests may use the provider's own name (`claude-sonnet-4-5-20250929`, `gpt-4o`): the gateway resolves it to the matching model, ignoring the vendor prefix, dots vs dashes and date suffixes.
-- **Reasoning** (chat completions): `reasoning_effort: "minimal"|"low"|"medium"|"high"` (OpenAI style) or `reasoning: { effort?, max_tokens?, exclude? }` (OpenRouter style). Mapped to Anthropic `thinking.budget_tokens` and Gemini `thinkingConfig`. Reasoning text is returned in `message.reasoning` / `delta.reasoning` (omitted with `exclude: true`).
+- **Reasoning** (chat completions): `reasoning_effort: "minimal"|"low"|"medium"|"high"` (OpenAI style) or `reasoning: { effort?, max_tokens?, exclude? }`. Mapped to Anthropic `thinking.budget_tokens` and Gemini `thinkingConfig`. Reasoning text is returned in `message.reasoning` / `delta.reasoning` (omitted with `exclude: true`).
 - **Prompt caching**: put `cache_control: {"type": "ephemeral"}` on a content part (system or user message) to mark a cache breakpoint for Anthropic; OpenAI and Gemini cache automatically. `usage.prompt_tokens_details.cached_tokens` and `usage.prompt_tokens_details.cache_write_tokens` report cache use, and cached tokens are billed at the model's cache prices.
 - **Structured outputs**: `response_format: {type: "json_schema", json_schema: {name, schema}}` works for all providers (Anthropic via a forced tool call; the JSON is returned as message content).
 - Limits: `429 rate_limited` (with a `Retry-After` header, seconds) when the key's or the user's requests-per-minute limit is hit; `403 model_not_allowed` when the key's `allowed_models` excludes the requested model.

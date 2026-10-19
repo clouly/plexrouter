@@ -71,7 +71,7 @@ func New(st *store.Store, box *secure.Box, opts Options, log *slog.Logger) *Gate
 		health: newHealth(), limiter: newRateLimiter()}
 }
 
-// Register mounts the API under /v1 and /api/v1 (OpenRouter-style base URL).
+// Register mounts the API under /v1 and /api/v1.
 func (g *Gateway) Register(mux *http.ServeMux) {
 	for _, p := range []string{"/v1", "/api/v1"} {
 		mux.HandleFunc("POST "+p+"/chat/completions", g.handleChat)
