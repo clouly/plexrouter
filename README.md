@@ -26,7 +26,7 @@ Users sign in with **GitHub or Google** (there are no passwords), so first creat
 ```bash
 docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data \
   -e PLEXROUTER_GITHUB_CLIENT_ID=<client-id> -e PLEXROUTER_GITHUB_CLIENT_SECRET=<client-secret> \
-  ghcr.io/clouly/plexrouter:latest
+  ghcr.io/local4a/plexrouter:latest
 ```
 
 or with compose (put the two variables in `.env`):
@@ -37,7 +37,7 @@ docker compose up -d
 
 ### Binary
 
-Download a binary from [Releases](https://github.com/clouly/plexrouter/releases) and run it:
+Download a binary from [Releases](https://github.com/local4a/plexrouter/releases) and run it:
 
 ```bash
 ./plexrouter
@@ -48,7 +48,7 @@ Download a binary from [Releases](https://github.com/clouly/plexrouter/releases)
 Requires Go 1.23+ and Node.js 20+.
 
 ```bash
-git clone https://github.com/clouly/plexrouter.git
+git clone https://github.com/local4a/plexrouter.git
 cd plexrouter
 make build        # builds the console into web/dist and the server into bin/
 ./bin/plexrouter
@@ -67,7 +67,7 @@ Then open <http://localhost:8080>:
 Any Linux server with Docker works; one instance with SQLite comfortably handles a team or a small public service.
 
 ```bash
-git clone https://github.com/clouly/plexrouter.git && cd plexrouter
+git clone https://github.com/local4a/plexrouter.git && cd plexrouter
 cp .env.example .env
 ```
 

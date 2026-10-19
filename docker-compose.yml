@@ -7,7 +7,7 @@ name: plexrouter
 
 services:
   plexrouter:
-    image: ghcr.io/clouly/plexrouter:latest
+    image: ghcr.io/local4a/plexrouter:latest
     build: .
     restart: unless-stopped
     ports:

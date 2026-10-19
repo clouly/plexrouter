@@ -26,7 +26,7 @@
 ```bash
 docker run -d --name plexrouter -p 8080:8080 -v plexrouter_data:/data \
   -e PLEXROUTER_GITHUB_CLIENT_ID=<client-id> -e PLEXROUTER_GITHUB_CLIENT_SECRET=<client-secret> \
-  ghcr.io/clouly/plexrouter:latest
+  ghcr.io/local4a/plexrouter:latest
 ```
 
 或使用 compose（把这两个变量写进 `.env`）：
@@ -37,7 +37,7 @@ docker compose up -d
 
 ### 二进制
 
-从 [Releases](https://github.com/clouly/plexrouter/releases) 下载对应平台的文件后直接运行：
+从 [Releases](https://github.com/local4a/plexrouter/releases) 下载对应平台的文件后直接运行：
 
 ```bash
 ./plexrouter
@@ -48,7 +48,7 @@ docker compose up -d
 需要 Go 1.23+ 和 Node.js 20+。
 
 ```bash
-git clone https://github.com/clouly/plexrouter.git
+git clone https://github.com/local4a/plexrouter.git
 cd plexrouter
 make build        # 构建控制台到 web/dist，构建服务端到 bin/
 ./bin/plexrouter
@@ -67,7 +67,7 @@ make build        # 构建控制台到 web/dist，构建服务端到 bin/
 任何装了 Docker 的 Linux 服务器都可以。单实例 + SQLite 足够支撑一个团队或小规模的对外服务。
 
 ```bash
-git clone https://github.com/clouly/plexrouter.git && cd plexrouter
+git clone https://github.com/local4a/plexrouter.git && cd plexrouter
 cp .env.example .env
 ```
 

@@ -1,4 +1,4 @@
-module github.com/clouly/plexrouter
+module github.com/local4a/plexrouter
 
 go 1.23.0
 

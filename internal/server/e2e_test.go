@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clouly/plexrouter/internal/gateway"
+	"github.com/local4a/plexrouter/internal/gateway"
 )
 
 // --- fake upstreams ---

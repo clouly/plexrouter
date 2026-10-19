@@ -3,8 +3,8 @@ package server
 import (
 	"time"
 
-	"github.com/clouly/plexrouter/internal/secure"
-	"github.com/clouly/plexrouter/internal/store"
+	"github.com/local4a/plexrouter/internal/secure"
+	"github.com/local4a/plexrouter/internal/store"
 )
 
 // JSON shapes of the console API (see docs/console-api.md). Money is USD.

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clouly/plexrouter/internal/oauth"
-	"github.com/clouly/plexrouter/internal/secure"
-	"github.com/clouly/plexrouter/internal/store"
+	"github.com/local4a/plexrouter/internal/oauth"
+	"github.com/local4a/plexrouter/internal/secure"
+	"github.com/local4a/plexrouter/internal/store"
 )
 
 const (

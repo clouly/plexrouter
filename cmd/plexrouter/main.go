@@ -14,12 +14,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/clouly/plexrouter/internal/config"
-	"github.com/clouly/plexrouter/internal/gateway"
-	"github.com/clouly/plexrouter/internal/secure"
-	"github.com/clouly/plexrouter/internal/server"
-	"github.com/clouly/plexrouter/internal/store"
-	"github.com/clouly/plexrouter/web"
+	"github.com/local4a/plexrouter/internal/config"
+	"github.com/local4a/plexrouter/internal/gateway"
+	"github.com/local4a/plexrouter/internal/secure"
+	"github.com/local4a/plexrouter/internal/server"
+	"github.com/local4a/plexrouter/internal/store"
+	"github.com/local4a/plexrouter/web"
 )
 
 // version is set at build time: -ldflags "-X main.version=v1.2.3".
