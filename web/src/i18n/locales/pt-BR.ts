@@ -73,13 +73,13 @@ const ptBR: Record<MessageKey, string> = {
   "auth.login": "Entrar",
   "auth.logout": "Sair",
   "auth.logoutFailed": "Falha ao sair",
-  "auth.loginTitle": "Entrar no {name}",
+  "auth.loginTitle": "Boas-vindas ao {name}",
   "auth.loginSubtitle": "Uma API para todos os modelos.",
   "auth.email": "E-mail",
   "auth.continueWith": "Continuar com {provider}",
   "auth.oauthFailed": "Falha no login ({code}). Tente novamente.",
   "auth.notConfigured": "O login ainda não foi configurado. O administrador precisa configurar o login com Google ou GitHub (veja o README).",
-  "auth.newAccountHint": "Primeira vez aqui? Sua conta é criada no primeiro login.",
+  "auth.newAccountHint": "Cadastre-se e entre com Google ou GitHub.\nSua conta é criada automaticamente no primeiro acesso.",
   "auth.registrationClosedHint": "O cadastro está fechado. Apenas contas existentes podem entrar.",
 
   // Dashboard

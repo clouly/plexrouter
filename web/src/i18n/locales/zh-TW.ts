@@ -74,13 +74,13 @@ const zhTW: Record<MessageKey, string> = {
   "auth.login": "登入",
   "auth.logout": "登出",
   "auth.logoutFailed": "登出失敗",
-  "auth.loginTitle": "登入 {name}",
+  "auth.loginTitle": "歡迎使用 {name}",
   "auth.loginSubtitle": "一個 API，串接所有模型。",
   "auth.email": "電子郵件",
   "auth.continueWith": "使用 {provider} 繼續",
   "auth.oauthFailed": "登入失敗（{code}），請再試一次。",
   "auth.notConfigured": "尚未設定登入方式。請管理員先設定 Google 或 GitHub 登入（請參閱 README）。",
-  "auth.newAccountHint": "首次登入時會自動建立帳號。",
+  "auth.newAccountHint": "使用 Google 或 GitHub 註冊並登入\n首次登入時自動建立帳號",
   "auth.registrationClosedHint": "目前未開放註冊，僅限既有帳號登入。",
 
   // Dashboard

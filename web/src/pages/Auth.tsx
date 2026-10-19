@@ -82,14 +82,22 @@ export function LoginPage() {
     <AuthShell
       title={t("auth.loginTitle", { name: config?.name || "PlexRouter" })}
       subtitle={t("auth.loginSubtitle")}
-      footer={providers.length > 0 && (config?.allow_register === false ? t("auth.registrationClosedHint") : t("auth.newAccountHint"))}
     >
       {oauthError && (
         <div role="alert" className="mb-4">
           <Notice tone="danger">{oauthError}</Notice>
         </div>
       )}
-      {config && providers.length === 0 ? <Notice tone="warning">{t("auth.notConfigured")}</Notice> : <OAuthButtons providers={providers} />}
+      {config && providers.length === 0 ? (
+        <Notice tone="warning">{t("auth.notConfigured")}</Notice>
+      ) : (
+        <>
+          <OAuthButtons providers={providers} />
+          <p className="mt-4 text-center text-xs leading-relaxed whitespace-pre-line text-balance text-muted">
+            {config?.allow_register === false ? t("auth.registrationClosedHint") : t("auth.newAccountHint")}
+          </p>
+        </>
+      )}
     </AuthShell>
   );
 }

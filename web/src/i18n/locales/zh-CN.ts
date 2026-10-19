@@ -74,13 +74,13 @@ const zhCN: Record<MessageKey, string> = {
   "auth.login": "登录",
   "auth.logout": "退出登录",
   "auth.logoutFailed": "退出登录失败",
-  "auth.loginTitle": "登录 {name}",
+  "auth.loginTitle": "欢迎使用 {name}",
   "auth.loginSubtitle": "一个 API，调用所有模型。",
   "auth.email": "邮箱",
   "auth.continueWith": "使用 {provider} 继续",
   "auth.oauthFailed": "登录失败（{code}），请重试。",
   "auth.notConfigured": "尚未配置登录方式。请管理员先配置 Google 或 GitHub 登录（见 README）。",
-  "auth.newAccountHint": "首次登录时会自动创建账号。",
+  "auth.newAccountHint": "使用 Google 或 GitHub 注册和登录\n首次登录时自动创建账号",
   "auth.registrationClosedHint": "当前未开放注册，仅已有账号可以登录。",
 
   // Dashboard

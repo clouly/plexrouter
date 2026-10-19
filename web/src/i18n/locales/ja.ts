@@ -74,13 +74,13 @@ const ja: Record<MessageKey, string> = {
   "auth.login": "ログイン",
   "auth.logout": "ログアウト",
   "auth.logoutFailed": "ログアウトに失敗しました",
-  "auth.loginTitle": "{name} にログイン",
+  "auth.loginTitle": "{name} へようこそ",
   "auth.loginSubtitle": "ひとつの API で、すべてのモデルを。",
   "auth.email": "メールアドレス",
   "auth.continueWith": "{provider} で続行",
   "auth.oauthFailed": "ログインに失敗しました（{code}）。もう一度お試しください。",
   "auth.notConfigured": "ログイン方法がまだ設定されていません。管理者が Google または GitHub ログインを設定する必要があります（README を参照）。",
-  "auth.newAccountHint": "初めてログインすると、アカウントが自動的に作成されます。",
+  "auth.newAccountHint": "Google または GitHub で登録・ログインできます。\n初回ログイン時にアカウントが自動作成されます。",
   "auth.registrationClosedHint": "現在、新規登録は受け付けていません。既存のアカウントのみログインできます。",
 
   // Dashboard

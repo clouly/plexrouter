@@ -73,13 +73,13 @@ const es: Record<MessageKey, string> = {
   "auth.login": "Iniciar sesión",
   "auth.logout": "Cerrar sesión",
   "auth.logoutFailed": "No se pudo cerrar sesión",
-  "auth.loginTitle": "Inicia sesión en {name}",
+  "auth.loginTitle": "Te damos la bienvenida a {name}",
   "auth.loginSubtitle": "Una sola API para todos los modelos.",
   "auth.email": "Correo electrónico",
   "auth.continueWith": "Continuar con {provider}",
   "auth.oauthFailed": "Error al iniciar sesión ({code}). Inténtalo de nuevo.",
   "auth.notConfigured": "El inicio de sesión aún no está configurado. El administrador debe configurar el acceso con Google o GitHub (consulta el README).",
-  "auth.newAccountHint": "¿Eres nuevo? Tu cuenta se crea la primera vez que inicias sesión.",
+  "auth.newAccountHint": "Regístrate e inicia sesión con Google o GitHub.\nTu cuenta se crea automáticamente la primera vez.",
   "auth.registrationClosedHint": "El registro está cerrado. Solo pueden iniciar sesión las cuentas existentes.",
 
   // Dashboard

@@ -79,13 +79,13 @@ export const en = {
   "auth.login": "Log in",
   "auth.logout": "Log out",
   "auth.logoutFailed": "Logout failed",
-  "auth.loginTitle": "Log in to {name}",
+  "auth.loginTitle": "Welcome to {name}",
   "auth.loginSubtitle": "One API for every model.",
   "auth.email": "Email",
   "auth.continueWith": "Continue with {provider}",
   "auth.oauthFailed": "Sign-in failed ({code}). Please try again.",
   "auth.notConfigured": "Sign-in isn't set up yet. The administrator needs to configure Google or GitHub sign-in (see the README).",
-  "auth.newAccountHint": "New here? Your account is created the first time you sign in.",
+  "auth.newAccountHint": "Sign up and log in with Google or GitHub.\nYour account is created automatically the first time.",
   "auth.registrationClosedHint": "Sign-up is closed. Only existing accounts can sign in.",
 
   // Dashboard

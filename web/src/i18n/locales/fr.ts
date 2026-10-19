@@ -73,13 +73,13 @@ const fr: Record<MessageKey, string> = {
   "auth.login": "Se connecter",
   "auth.logout": "Se déconnecter",
   "auth.logoutFailed": "Échec de la déconnexion",
-  "auth.loginTitle": "Connexion à {name}",
+  "auth.loginTitle": "Bienvenue sur {name}",
   "auth.loginSubtitle": "Une seule API pour tous les modèles.",
   "auth.email": "E-mail",
   "auth.continueWith": "Continuer avec {provider}",
   "auth.oauthFailed": "Échec de la connexion ({code}). Veuillez réessayer.",
   "auth.notConfigured": "La connexion n’est pas encore configurée. L’administrateur doit configurer la connexion Google ou GitHub (voir le README).",
-  "auth.newAccountHint": "Nouveau ? Votre compte est créé lors de votre première connexion.",
+  "auth.newAccountHint": "Inscrivez-vous et connectez-vous avec Google ou GitHub.\nVotre compte est créé automatiquement la première fois.",
   "auth.registrationClosedHint": "Les inscriptions sont fermées. Seuls les comptes existants peuvent se connecter.",
 
   // Dashboard

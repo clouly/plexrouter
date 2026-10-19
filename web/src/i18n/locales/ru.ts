@@ -73,13 +73,13 @@ const ru: Record<MessageKey, string> = {
   "auth.login": "Войти",
   "auth.logout": "Выйти",
   "auth.logoutFailed": "Не удалось выйти",
-  "auth.loginTitle": "Вход в {name}",
+  "auth.loginTitle": "Добро пожаловать в {name}",
   "auth.loginSubtitle": "Один API для всех моделей.",
   "auth.email": "Эл. почта",
   "auth.continueWith": "Продолжить с {provider}",
   "auth.oauthFailed": "Не удалось войти ({code}). Попробуйте ещё раз.",
   "auth.notConfigured": "Вход ещё не настроен. Администратору нужно настроить вход через Google или GitHub (см. README).",
-  "auth.newAccountHint": "Впервые здесь? Аккаунт создаётся при первом входе.",
+  "auth.newAccountHint": "Регистрация и вход — через Google или GitHub.\nАккаунт создаётся автоматически при первом входе.",
   "auth.registrationClosedHint": "Регистрация закрыта. Войти могут только существующие аккаунты.",
 
   // Dashboard

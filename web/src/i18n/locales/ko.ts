@@ -74,13 +74,13 @@ const ko: Record<MessageKey, string> = {
   "auth.login": "로그인",
   "auth.logout": "로그아웃",
   "auth.logoutFailed": "로그아웃하지 못했습니다",
-  "auth.loginTitle": "{name}에 로그인",
+  "auth.loginTitle": "{name}에 오신 것을 환영합니다",
   "auth.loginSubtitle": "하나의 API로 모든 모델을.",
   "auth.email": "이메일",
   "auth.continueWith": "{provider}(으)로 계속하기",
   "auth.oauthFailed": "로그인하지 못했습니다({code}). 다시 시도하세요.",
   "auth.notConfigured": "아직 로그인 방법이 설정되지 않았습니다. 관리자가 Google 또는 GitHub 로그인을 설정해야 합니다(README 참고).",
-  "auth.newAccountHint": "처음 로그인하면 계정이 자동으로 생성됩니다.",
+  "auth.newAccountHint": "Google 또는 GitHub로 가입하고 로그인하세요.\n처음 로그인할 때 계정이 자동으로 만들어집니다.",
   "auth.registrationClosedHint": "현재 신규 가입을 받지 않습니다. 기존 계정만 로그인할 수 있습니다.",
 
   // Dashboard

@@ -73,13 +73,13 @@ const de: Record<MessageKey, string> = {
   "auth.login": "Anmelden",
   "auth.logout": "Abmelden",
   "auth.logoutFailed": "Abmelden fehlgeschlagen",
-  "auth.loginTitle": "Bei {name} anmelden",
+  "auth.loginTitle": "Willkommen bei {name}",
   "auth.loginSubtitle": "Eine API für alle Modelle.",
   "auth.email": "E-Mail",
   "auth.continueWith": "Weiter mit {provider}",
   "auth.oauthFailed": "Anmeldung fehlgeschlagen ({code}). Bitte versuchen Sie es erneut.",
   "auth.notConfigured": "Die Anmeldung ist noch nicht eingerichtet. Der Administrator muss die Anmeldung über Google oder GitHub konfigurieren (siehe README).",
-  "auth.newAccountHint": "Neu hier? Ihr Konto wird bei der ersten Anmeldung erstellt.",
+  "auth.newAccountHint": "Registrierung und Anmeldung erfolgen über Google oder GitHub.\nIhr Konto wird beim ersten Mal automatisch erstellt.",
   "auth.registrationClosedHint": "Die Registrierung ist geschlossen. Nur bestehende Konten können sich anmelden.",
 
   // Dashboard
